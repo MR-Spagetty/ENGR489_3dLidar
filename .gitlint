@@ -5,7 +5,6 @@
 # ignore built-in gitlint rules which require a body.
 
 [general]
-contrib = contrib-title-conventional-commits
 ignore = body-max-line-length, body-is-missing, body-min-length
 
 [title-max-length]
