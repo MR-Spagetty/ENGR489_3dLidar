@@ -1,0 +1,11 @@
+# See <https://jorisroovers.github.io/gitlint> for full documentation.
+
+# Configure gitlint to enforce the Conventional Commits specification.
+# Commit message bodies are optional under the specification, so
+# ignore built-in gitlint rules which require a body.
+
+[general]
+ignore = body-max-line-length, body-is-missing, body-min-length
+
+[title-max-length]
+line-length = 80
