@@ -59,7 +59,7 @@ class group():
 
         for child in children:
             rot = self.get_rot()
-            child.workingAxis = rot @ (child.workingAxis - child.workingPos) + child.workingPos
+            child.workingAxis = rot @ child.workingAxis
             child.workingPos = rot @ child.workingPos + vecToArr(self.offset)
 
         if self.parent is not None:
@@ -71,18 +71,24 @@ class group():
             child.out.axis = vec(*child.workingAxis)
 
 
+def point(pos=vec(0, 0, 0), color=color.white, axis = vec(1, 0, 0)):
+    return sphere(pos=pos, color=color, axis=axis)
 
 # g = group()
 
 laser_trail_source = sphere( make_trail=True, trail_type="curve", trail_radius=1, interval=1, retain = 200 , color=color.red, opacity=0)
-laser_pose = arrow(pos=vec(0,0,0), axis=vec(1,0,0))
+laser_pose = arrow()
 laser_pose.length = 20
+laser_pose.color = color.red
 laser_pose_ref = arrow(pos=vec(0, 0, 0), axis=vec(1, 0, 0), visible = False)
 # centralPlatform = compound([laser_pose])
 
 altYaw = group(None, [])
-pitch = group(altYaw, [])
-yaw = group(pitch, [obj(laser_pose_ref, laser_pose)])
+pitch = group(altYaw, [obj(point(pos=vec(0, -0.5, 0), axis=vec(0, 1, 0)), cylinder(radius=10, length=1))])
+yaw = group(pitch, [
+    obj(laser_pose_ref, laser_pose)
+    ])
+yaw.offset = vec(5, 5, 0)
 
 
 groups = [
