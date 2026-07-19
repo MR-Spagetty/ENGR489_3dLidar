@@ -11,6 +11,7 @@ def vecToArr(vec):
 class obj:
     def __init__(self, ref, controlled) -> None:
         self.ref = ref
+        ref.visible = False
         self.workingPos = np.array([0, 0, 0])
         self.workingAxis = np.array([0, 0, 0])
         self.out = controlled
@@ -22,9 +23,9 @@ class group():
         self.parent = parent
         self.children = children
         self.offset = vec(0, 0, 0)
-        self.rotX = 0
-        self.rotY = 0
-        self.rotZ = 0
+        self.rotX = 0.
+        self.rotY = 0.
+        self.rotZ = 0.
 
     def get_rot(self):
 
@@ -76,7 +77,7 @@ class group():
 laser_trail_source = sphere( make_trail=True, trail_type="curve", trail_radius=1, interval=1, retain = 200 , color=color.red, opacity=0)
 laser_pose = arrow(pos=vec(0,0,0), axis=vec(1,0,0))
 laser_pose.length = 20
-laser_pose_ref = arrow(pos=vec(0, 0, 0), axis=vec(1, 0, 0))
+laser_pose_ref = arrow(pos=vec(0, 0, 0), axis=vec(1, 0, 0), visible = False)
 # centralPlatform = compound([laser_pose])
 
 altYaw = group(None, [])
@@ -90,7 +91,10 @@ groups = [
 while True:
     rate(RATE)
 
+    yaw.rotY += LASER_ROT_VEL
+    pitch.rotX += LASER_ROT_VEL
+
     for g in groups:
         g.apply()
 
-    laser_trail_source.pos = laser_pose.pos + laser_pose.axis*laser_pose.length
+    laser_trail_source.pos = laser_pose.pos + laser_pose.axis* 20
