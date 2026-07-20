@@ -1,10 +1,16 @@
 from vpython import *
 import numpy as np
 
-RATE = 100
+RATE = 8000
+LASER_DIST = 20
+LASER_FREQ = 10 # Hz
+LASER_ROT_VEL_RPM = 363.6
+LASER_ROT_VEL_RAD_PER_SEC = LASER_ROT_VEL_RPM/60 * radians(360)
+LASER_SAMPLE_RATE_Hz = 8000 # Hz
+LASER_POINT_RETENTION = 40000
 
-LASER_ROT_VEL = radians(1)
-
+LASER_ROT_VEL = LASER_ROT_VEL_RAD_PER_SEC / RATE
+LASER_POINT_RATE = RATE / min(RATE, LASER_SAMPLE_RATE_Hz)
 def vecToArr(vec):
     return np.array([vec.x, vec.y, vec.z])
 
@@ -74,17 +80,22 @@ class group():
 def point(pos=vec(0, 0, 0), color=color.white, axis = vec(1, 0, 0)):
     return sphere(pos=pos, color=color, axis=axis)
 
+origin_x = arrow(axis=vec(3,0,0), color=color.green)
+origin_y = arrow(axis=vec(0,3,0), color=color.yellow)
+origin_y = arrow(axis=vec(0,0,3), color=color.blue)
+
 # g = group()
 
-laser_trail_source = sphere( make_trail=True, trail_type="curve", trail_radius=1, interval=1, retain = 200 , color=color.red, opacity=0)
-laser_pose = arrow()
+laser_trail_source = sphere( make_trail=True, trail_type="points", trail_radius=0.1, interval=LASER_POINT_RATE, retain = LASER_POINT_RETENTION , color=color.red, opacity=0)
+laser_pose = arrow(shaftwidth=0.5)
 laser_pose.length = 20
 laser_pose.color = color.red
-laser_pose_ref = arrow(pos=vec(0, 0, 0), axis=vec(1, 0, 0), visible = False)
+laser_pose_ref = arrow(pos=vec(0, 0, 0), axis=vec(1, 0, 0)*15, visible = False)
 # centralPlatform = compound([laser_pose])
 
 altYaw = group(None, [])
 pitch = group(altYaw, [obj(point(pos=vec(0, -0.5, 0), axis=vec(0, 1, 0)), cylinder(radius=10, length=1))])
+pitch.offset = vec(0, 10, 0)
 yaw = group(pitch, [
     obj(laser_pose_ref, laser_pose)
     ])
@@ -98,9 +109,9 @@ while True:
     rate(RATE)
 
     yaw.rotY += LASER_ROT_VEL
-    pitch.rotX += LASER_ROT_VEL
+    pitch.rotZ += radians(5)/RATE
 
     for g in groups:
         g.apply()
 
-    laser_trail_source.pos = laser_pose.pos + laser_pose.axis* 20
+    laser_trail_source.pos = laser_pose.pos + laser_pose.axis.norm()* LASER_DIST
