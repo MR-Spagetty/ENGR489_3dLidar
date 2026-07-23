@@ -9,6 +9,9 @@ LASER_ROT_VEL_RAD_PER_SEC = LASER_ROT_VEL_RPM/60 * radians(360)
 LASER_SAMPLE_RATE_Hz = 8000 # Hz
 LASER_POINT_RETENTION = 40000
 
+def mm_to_cm(mm):
+    return mm/10
+
 LASER_ROT_VEL = LASER_ROT_VEL_RAD_PER_SEC / RATE
 LASER_POINT_RATE = RATE / min(RATE, LASER_SAMPLE_RATE_Hz)
 def vecToArr(vec):
@@ -20,6 +23,7 @@ class obj:
         ref.visible = False
         self.workingPos = np.array([0, 0, 0])
         self.workingAxis = np.array([0, 0, 0])
+        self.workingUp = np.array([0, 0, 0])
         self.out = controlled
 
 class group():
@@ -59,6 +63,7 @@ class group():
             children = self.children
             for child in children:
                 child.workingPos = vecToArr(child.ref.pos)
+                child.workingUp = vecToArr(child.ref.up)
                 child.workingAxis = vecToArr(child.ref.axis)
         else:
             frm_child = True
@@ -66,6 +71,7 @@ class group():
         for child in children:
             rot = self.get_rot()
             child.workingAxis = rot @ child.workingAxis
+            child.workingUp = rot @ child.workingUp
             child.workingPos = rot @ child.workingPos + vecToArr(self.offset)
 
         if self.parent is not None:
@@ -75,6 +81,7 @@ class group():
         for child in children:
             child.out.pos = vec(*child.workingPos)
             child.out.axis = vec(*child.workingAxis)
+            child.out.up = vec(*child.workingUp)
 
 
 def point(pos=vec(0, 0, 0), color=color.white, axis = vec(1, 0, 0)):
@@ -84,22 +91,24 @@ origin_x = arrow(axis=vec(3,0,0), color=color.green)
 origin_y = arrow(axis=vec(0,3,0), color=color.yellow)
 origin_y = arrow(axis=vec(0,0,3), color=color.blue)
 
-# g = group()
-
 laser_trail_source = sphere( make_trail=True, trail_type="points", trail_radius=0.1, interval=LASER_POINT_RATE, retain = LASER_POINT_RETENTION , color=color.red, opacity=0)
-laser_pose = arrow(shaftwidth=0.5)
+laser_pose = arrow(shaftwidth=0.2)
 laser_pose.length = 20
 laser_pose.color = color.red
-laser_pose_ref = arrow(pos=vec(0, 0, 0), axis=vec(1, 0, 0)*15, visible = False)
-# centralPlatform = compound([laser_pose])
+
+lidar_center_pos = vec(5, 0, 0)
 
 altYaw = group(None, [])
-pitch = group(altYaw, [obj(point(pos=vec(0, -0.5, 0), axis=vec(0, 1, 0)), cylinder(radius=10, length=1))])
+pitch = group(altYaw, [
+    obj(point(pos=vec(0, -1, 0), axis=vec(0, 1, 0)), cylinder(radius=10, length=1)),
+    obj(point(pos=lidar_center_pos+vec(0, mm_to_cm(31.5/2), 0), axis=vec(mm_to_cm(70.28), 0, 0)), box(height=mm_to_cm(31.5), width=mm_to_cm(70.28)))
+    ])
 pitch.offset = vec(0, 10, 0)
 yaw = group(pitch, [
-    obj(laser_pose_ref, laser_pose)
+    obj(arrow(pos=vec(0, mm_to_cm(42-31.5), 0), axis=vec(1, 0, 0)*15), laser_pose),
+    obj(point(pos = vec(0, 0, 0), axis = vec(0, 1, 0)), cylinder(radius=mm_to_cm(70.04/2), length=mm_to_cm(51-31.5), color=color.blue))
     ])
-yaw.offset = vec(5, 5, 0)
+yaw.offset = lidar_center_pos + vec(0, mm_to_cm(31.5), 0)
 
 
 groups = [
@@ -109,7 +118,6 @@ while True:
     rate(RATE)
 
     yaw.rotY += LASER_ROT_VEL
-    pitch.rotZ += radians(5)/RATE
 
     for g in groups:
         g.apply()
