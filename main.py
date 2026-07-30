@@ -31,7 +31,7 @@ laser_pose.color = color.red
 lidar_center_pos = vec(0, 0, 0)
 world = group(None, [])
 env = group(world, [
-    obj(point(pos = vec (20, 0, 0), axis=vec(0, 10, 0)), cylinder(radius=3, visible=False)),
+    obj(point(pos = vec (20, 0, 0), axis=vec(0, 10, 0)), cylinder(radius=3)),
     obj(point(pos = vec (20, 15, 0)), sphere(radius=3))
     ])
 
@@ -138,6 +138,13 @@ yaw = group(pitch, [
     obj(point(pos = vec(0, 0, 0), axis = vec(0, mm_to_cm(51-31.5), 0)), cylinder(radius=mm_to_cm(70.04/2), color=color.blue))
     ])
 yaw.offset = lidar_center_pos + vec(0, mm_to_cm(31.5+5/2), 0)
+
+def toggleEnv(evt):
+    key = evt.key
+    if key == "q":
+        env.toggle_visible()
+
+scene.bind('keydown', toggleEnv)
 
 tick = 0
 env.prop()

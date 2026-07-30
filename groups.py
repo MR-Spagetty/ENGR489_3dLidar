@@ -131,6 +131,12 @@ class Group:
     def childGroups(self) -> list[Group]:
         return self.child_groups
 
+    def toggle_visible(self):
+        for child in self.children:
+            child.out.visible = not child.out.visible
+        for child in self.child_groups:
+            child.toggle_visible()
+
     def get_rot(self) -> np.ndarray:
         """Return the XYZ Euler rotation matrix used by the project utilities."""
         cosine_x, sine_x = np.cos(self.rot_x), np.sin(self.rot_x)
