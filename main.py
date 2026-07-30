@@ -29,9 +29,9 @@ laser_pose = arrow(shaftwidth=0.2)
 laser_pose.color = color.red
 
 lidar_center_pos = vec(0, 0, 0)
-
-env = group(None, [
-    obj(point(pos = vec (20, 0, 0), axis=vec(0, 10, 0)), cylinder(radius=3)),
+world = group(None, [])
+env = group(world, [
+    obj(point(pos = vec (20, 0, 0), axis=vec(0, 10, 0)), cylinder(radius=3, visible=False)),
     obj(point(pos = vec (20, 15, 0)), sphere(radius=3))
     ])
 
@@ -109,7 +109,7 @@ frame_visual = compound(
     color=color.gray(0.6),
 )
 
-robot = group(env, [
+robot = group(world, [
     obj(point(pos=vec(0, 0, 0), axis=vec(1, 0, 0)), frame_visual, colliders=frame_colliders),
     obj(point(pos=vec(mm_to_cm((-432+130)/2), mm_to_cm((48+95)/2), mm_to_cm(48/2+265/2)), axis=vec(0, mm_to_cm(95), 0)), box(width=mm_to_cm(65), height=mm_to_cm(130), color=rgb_col(200, 30, 30))),
     obj(point(pos=vec(mm_to_cm((-432-3)/2+24), mm_to_cm((150-48)/2), 0), axis=vec(mm_to_cm(3), 0, 0)), box(width=mm_to_cm(150), height=mm_to_cm(150), color=rgb_col(200, 30, 30)))
@@ -140,16 +140,17 @@ yaw = group(pitch, [
 yaw.offset = lidar_center_pos + vec(0, mm_to_cm(31.5+5/2), 0)
 
 tick = 0
+env.prop()
 while True:
     rate(RATE)
 
     yaw.rotY += LASER_ROT_VEL
     pitch.rotZ -= radians(10)/RATE
 
-    env.prop()
+    robot.prop()
     tick += 1
     if tick >= LASER_POINT_RATE:
         tick = 0
-        hit = raycast(groups=env, ray_origin=laser_pose.pos, ray_direction=laser_pose.axis.norm(), max_distance=1000, ignored_objects=[yaw])
+        hit = raycast(groups=world, ray_origin=laser_pose.pos, ray_direction=laser_pose.axis.norm(), max_distance=1000, ignored_objects=[yaw])
         if hit is not None:
             laser_trail_source.pos = hit.point
