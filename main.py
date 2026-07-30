@@ -15,7 +15,7 @@ LASER_POINT_RETENTION = 4000
 ALT_YAW_EXTRA = 0 # extra offset from alt yaw system for future
 
 LASER_ROT_VEL = LASER_ROT_VEL_RAD_PER_SEC / RATE
-LASER_POINT_RATE = RATE / min(RATE, LASER_SAMPLE_RATE_Hz) * 40
+LASER_POINT_RATE = RATE / min(RATE, LASER_SAMPLE_RATE_Hz)
 
 def point(pos=vec(0, 0, 0), color=color.white, axis = vec(1, 0, 0)):
     return sphere(pos=pos, color=color, axis=axis)
@@ -24,13 +24,16 @@ origin_x = arrow(axis=vec(3,0,0), color=color.green)
 origin_y = arrow(axis=vec(0,3,0), color=color.yellow)
 origin_y = arrow(axis=vec(0,0,3), color=color.blue)
 
-laser_trail_source = sphere( make_trail=False, trail_type="curve", trail_radius=0.1, interval=LASER_POINT_RATE, retain = LASER_POINT_RETENTION , color=color.red, opacity=0)
+laser_trail_source = sphere( make_trail=True, trail_type="points", trail_radius=0.1, interval=1, retain = LASER_POINT_RETENTION , color=color.red, opacity=0)
 laser_pose = arrow(shaftwidth=0.2)
 laser_pose.color = color.red
 
 lidar_center_pos = vec(0, 0, 0)
 
-env = group(None, [])
+env = group(None, [
+    obj(point(pos = vec (20, 0, 0), axis=vec(0, 10, 0)), cylinder(radius=3)),
+    obj(point(pos = vec (20, 15, 0)), sphere(radius=3))
+    ])
 
 frame_colliders = [
     # Front cross rail
@@ -136,24 +139,17 @@ yaw = group(pitch, [
     ])
 yaw.offset = lidar_center_pos + vec(0, mm_to_cm(31.5+5/2), 0)
 
-hits = []
-for i in range(LASER_POINT_RETENTION):
-    hits.append(sphere(radius = 0.05, color=color.red))
-
-hits_ind = 0
 tick = 0
 while True:
     rate(RATE)
 
     yaw.rotY += LASER_ROT_VEL
-    pitch.rotZ += radians(10)/RATE
+    pitch.rotZ -= radians(10)/RATE
 
-    robot.prop()
-    laser_trail_source.pos = laser_pose.pos + laser_pose.axis.norm()* LASER_DIST
+    env.prop()
     tick += 1
-    if tick == 1:
+    if tick >= LASER_POINT_RATE:
         tick = 0
         hit = raycast(groups=env, ray_origin=laser_pose.pos, ray_direction=laser_pose.axis.norm(), max_distance=1000, ignored_objects=[yaw])
         if hit is not None:
-            hits[hits_ind].pos = hit.point
-            hits_ind = (hits_ind + 1) % len(hits)
+            laser_trail_source.pos = hit.point

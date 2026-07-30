@@ -1,24 +1,21 @@
-# raycasting.py
+"""Raycasting against VPython objects and hierarchical Group/Obj trees."""
 
-from dataclasses import dataclass, field
+from __future__ import annotations
+
 from collections.abc import Iterable
+from dataclasses import dataclass, field
+from math import inf
 
 import numpy as np
 from vpython import vec, vector
 
-RAYCASTING_VERSION = "2026-07-30-recursive-collection-v3"
+RAYCASTING_VERSION = "2026-07-30-complete-rounded-v5"
+_EPSILON = 1e-10
 
 
 @dataclass
 class BoxCollider:
-    """
-    A non-rendered box collider defined in the local coordinate system of an obj.
-
-    axis determines the collider's length and local X direction.
-    up determines its local Y direction.
-    width extends along its local Z direction.
-    height extends along its local Y direction.
-    """
+    """Local-space oriented box collider attached to an Obj wrapper."""
 
     pos: vector
     axis: vector
@@ -38,104 +35,112 @@ class RayHit:
 
 
 def _to_numpy(value) -> np.ndarray:
-    """Convert a VPython vector or array-like value into a NumPy vector."""
     if hasattr(value, "x"):
         return np.array([value.x, value.y, value.z], dtype=float)
-
     return np.asarray(value, dtype=float)
 
 
 def _to_vpython(value) -> vector:
-    """Convert an array-like value into a VPython vector."""
+    value = _to_numpy(value)
     return vec(float(value[0]), float(value[1]), float(value[2]))
 
 
-def _normalise(value: np.ndarray) -> np.ndarray:
+def _normalise(value) -> np.ndarray:
+    value = _to_numpy(value)
     magnitude = np.linalg.norm(value)
-
-    if magnitude < 1e-12:
+    if magnitude < _EPSILON:
         return np.zeros(3, dtype=float)
-
     return value / magnitude
 
 
-def _object_basis(wrapper):
-    """
-    Build the object's world-space basis from the rendered VPython object.
+def _is_group(value) -> bool:
+    return (
+        hasattr(value, "children")
+        and hasattr(value, "child_groups")
+        and not hasattr(value, "out")
+    )
 
-    The rendered object's transform is the source of truth. Cached working_*
-    values can still be zero before the first prop() call or stale if raycast()
-    is called between transform updates.
 
-    Returns:
+def _is_obj(value) -> bool:
+    return hasattr(value, "out") and hasattr(value, "colliders")
 
-        forward: local X direction in world space
-        up:      local Y direction in world space
-        side:    local Z direction in world space
-    """
-    visual = wrapper.out
-    forward = _normalise(_to_numpy(visual.axis))
-    up = _normalise(_to_numpy(visual.up))
 
-    if np.linalg.norm(forward) < 1e-12:
+def _is_iterable_container(value) -> bool:
+    return isinstance(value, Iterable) and not isinstance(value, (str, bytes))
+
+
+def _visual_type_name(visual) -> str:
+    """Return a useful lower-case VPython primitive type name."""
+    name = type(visual).__name__.lower()
+
+    # VPython implementations sometimes expose generic internal class names.
+    for attribute in ("_objName", "objName", "type"):
+        value = getattr(visual, attribute, None)
+        if isinstance(value, str) and value:
+            return value.lower()
+
+    return name
+
+
+def _looks_like_sphere(visual) -> bool:
+    name = _visual_type_name(visual)
+    return "sphere" in name or (
+        hasattr(visual, "radius")
+        and hasattr(visual, "pos")
+        and not hasattr(visual, "axis")
+    )
+
+
+def _looks_like_cylinder(visual) -> bool:
+    name = _visual_type_name(visual)
+    return "cylinder" in name or (
+        hasattr(visual, "radius")
+        and hasattr(visual, "axis")
+        and hasattr(visual, "pos")
+        and not hasattr(visual, "length")
+    )
+
+
+def _object_basis(visual):
+    """Return orthonormal local X/Y/Z directions for a rendered object."""
+    forward = _normalise(visual.axis)
+    if np.linalg.norm(forward) < _EPSILON:
         return None
 
-    # Remove any component of up that points along forward.
+    up_source = getattr(visual, "up", vec(0, 1, 0))
+    up = _to_numpy(up_source)
     up = up - np.dot(up, forward) * forward
     up = _normalise(up)
 
-    if np.linalg.norm(up) < 1e-12:
+    if np.linalg.norm(up) < _EPSILON:
         fallback = np.array([0.0, 1.0, 0.0])
-
         if abs(np.dot(fallback, forward)) > 0.99:
             fallback = np.array([0.0, 0.0, 1.0])
+        up = _normalise(fallback - np.dot(fallback, forward) * forward)
 
-        up = fallback - np.dot(fallback, forward) * forward
-        up = _normalise(up)
-
-    # VPython's width direction corresponds to axis × up.
     side = _normalise(np.cross(forward, up))
-
-    if np.linalg.norm(side) < 1e-12:
+    if np.linalg.norm(side) < _EPSILON:
         return None
 
-    # Recalculate up to ensure the basis is orthogonal.
     up = _normalise(np.cross(side, forward))
-
     return forward, up, side
 
 
 def _local_vector_to_world(local_vector, basis) -> np.ndarray:
-    """Rotate a vector from an obj's local space into world space."""
     forward, up, side = basis
     local = _to_numpy(local_vector)
-
-    return (
-        forward * local[0]
-        + up * local[1]
-        + side * local[2]
-    )
+    return forward * local[0] + up * local[1] + side * local[2]
 
 
 def _collider_world_transform(wrapper, collider: BoxCollider):
-    """
-    Convert one local collider into world-space box parameters.
-
-    This uses workingPos, workingAxis and workingUp produced by the existing
-    group propagation code. It does not alter or replace prop().
-    """
-    basis = _object_basis(wrapper)
-
+    visual = wrapper.out
+    basis = _object_basis(visual)
     if basis is None:
         return None
 
-    wrapper_position = _to_numpy(wrapper.out.pos)
-
-    world_position = (
-        wrapper_position
-        + _local_vector_to_world(collider.pos, basis)
+    world_position = _to_numpy(visual.pos) + _local_vector_to_world(
+        collider.pos, basis
     )
-
     world_axis = _local_vector_to_world(collider.axis, basis)
     world_up = _local_vector_to_world(collider.up, basis)
 
@@ -148,6 +153,132 @@ def _collider_world_transform(wrapper, collider: BoxCollider):
     )
 
 
+def ray_sphere_intersection(
+    ray_origin,
+    ray_direction,
+    sphere_position,
+    sphere_radius,
+    max_distance=inf,
+):
+    """Return the nearest exact ray/sphere hit, or None."""
+    origin = _to_numpy(ray_origin)
+    direction = _normalise(ray_direction)
+    centre = _to_numpy(sphere_position)
+    radius = float(sphere_radius)
+
+    if np.linalg.norm(direction) < _EPSILON or radius <= 0:
+        return None
+
+    offset = origin - centre
+    half_b = np.dot(offset, direction)
+    c = np.dot(offset, offset) - radius * radius
+    discriminant = half_b * half_b - c
+
+    if discriminant < 0:
+        return None
+
+    root = np.sqrt(max(0.0, discriminant))
+    near = -half_b - root
+    far = -half_b + root
+
+    if near >= 0:
+        distance = near
+    elif far >= 0:
+        distance = far
+    else:
+        return None
+
+    if distance > max_distance:
+        return None
+
+    point = origin + direction * distance
+    normal = _normalise(point - centre)
+    return float(distance), point, normal
+
+
+def ray_cylinder_intersection(
+    ray_origin,
+    ray_direction,
+    cylinder_position,
+    cylinder_axis,
+    cylinder_radius,
+    max_distance=inf,
+):
+    """
+    Return the nearest exact hit on a finite VPython cylinder.
+
+    VPython cylinder.pos is the centre of its first circular cap and axis points
+    from that cap to the centre of the second cap. Both the curved wall and the
+    two circular caps are tested.
+    """
+    origin = _to_numpy(ray_origin)
+    direction = _normalise(ray_direction)
+    base = _to_numpy(cylinder_position)
+    axis = _to_numpy(cylinder_axis)
+    radius = float(cylinder_radius)
+    length = np.linalg.norm(axis)
+
+    if (
+        np.linalg.norm(direction) < _EPSILON
+        or length < _EPSILON
+        or radius <= 0
+    ):
+        return None
+
+    axis_direction = axis / length
+    relative_origin = origin - base
+    origin_axial = np.dot(relative_origin, axis_direction)
+    direction_axial = np.dot(direction, axis_direction)
+
+    origin_radial = relative_origin - origin_axial * axis_direction
+    direction_radial = direction - direction_axial * axis_direction
+
+    candidates = []
+
+    # Curved wall: solve the quadratic in the plane perpendicular to the axis.
+    a = np.dot(direction_radial, direction_radial)
+    b = 2.0 * np.dot(origin_radial, direction_radial)
+    c = np.dot(origin_radial, origin_radial) - radius * radius
+
+    if a > _EPSILON:
+        discriminant = b * b - 4.0 * a * c
+        if discriminant >= 0:
+            root = np.sqrt(max(0.0, discriminant))
+            for distance in (
+                (-b - root) / (2.0 * a),
+                (-b + root) / (2.0 * a),
+            ):
+                if distance < 0 or distance > max_distance:
+                    continue
+                axial_position = origin_axial + distance * direction_axial
+                if -_EPSILON <= axial_position <= length + _EPSILON:
+                    point = origin + direction * distance
+                    centre_line_point = base + axial_position * axis_direction
+                    normal = _normalise(point - centre_line_point)
+                    candidates.append((float(distance), point, normal))
+
+    # Circular end caps.
+    if abs(direction_axial) > _EPSILON:
+        for cap_axial, cap_normal in (
+            (0.0, -axis_direction),
+            (length, axis_direction),
+        ):
+            distance = (cap_axial - origin_axial) / direction_axial
+            if distance < 0 or distance > max_distance:
+                continue
+
+            point = origin + direction * distance
+            cap_centre = base + cap_axial * axis_direction
+            radial = point - cap_centre
+            if np.dot(radial, radial) <= radius * radius + _EPSILON:
+                candidates.append((float(distance), point, cap_normal.copy()))
+
+    if not candidates:
+        return None
+
+    return min(candidates, key=lambda hit: hit[0])
+
+
 def ray_obb_intersection(
     ray_origin,
     ray_direction,
@@ -156,105 +287,62 @@ def ray_obb_intersection(
     box_up,
     box_width,
     box_height,
-    max_distance=float("inf"),
+    max_distance=inf,
 ):
-    """
-    Intersect a ray with an oriented bounding box.
-
-    Returns:
-
-        distance, hit_position, hit_normal
-
-    or None when there is no intersection.
-    """
+    """Return the nearest ray/oriented-box hit, or None."""
     origin = _to_numpy(ray_origin)
-    direction = _normalise(_to_numpy(ray_direction))
-
+    direction = _normalise(ray_direction)
     centre = _to_numpy(box_position)
     axis = _to_numpy(box_axis)
     up = _to_numpy(box_up)
 
-    if np.linalg.norm(direction) < 1e-12:
+    length = np.linalg.norm(axis)
+    if np.linalg.norm(direction) < _EPSILON or length < _EPSILON:
         return None
 
-    box_length = np.linalg.norm(axis)
-
-    if box_length < 1e-12:
-        return None
-
-    local_x = axis / box_length
-
+    local_x = axis / length
     up = up - np.dot(up, local_x) * local_x
     local_y = _normalise(up)
 
-    if np.linalg.norm(local_y) < 1e-12:
+    if np.linalg.norm(local_y) < _EPSILON:
         fallback = np.array([0.0, 1.0, 0.0])
-
         if abs(np.dot(fallback, local_x)) > 0.99:
             fallback = np.array([0.0, 0.0, 1.0])
-
-        local_y = fallback - np.dot(fallback, local_x) * local_x
-        local_y = _normalise(local_y)
+        local_y = _normalise(fallback - np.dot(fallback, local_x) * local_x)
 
     local_z = _normalise(np.cross(local_x, local_y))
-
-    if np.linalg.norm(local_z) < 1e-12:
+    if np.linalg.norm(local_z) < _EPSILON:
         return None
-
     local_y = _normalise(np.cross(local_z, local_x))
 
     relative_origin = origin - centre
-
-    local_origin = np.array([
-        np.dot(relative_origin, local_x),
-        np.dot(relative_origin, local_y),
-        np.dot(relative_origin, local_z),
+    basis = (local_x, local_y, local_z)
+    local_origin = np.array([np.dot(relative_origin, value) for value in basis])
+    local_direction = np.array([np.dot(direction, value) for value in basis])
+    extents = np.array([
+        length / 2.0,
+        float(box_height) / 2.0,
+        float(box_width) / 2.0,
     ])
 
-    local_direction = np.array([
-        np.dot(direction, local_x),
-        np.dot(direction, local_y),
-        np.dot(direction, local_z),
-    ])
-
-    half_extents = np.array([
-        box_length / 2.0,
-        box_height / 2.0,
-        box_width / 2.0,
-    ])
-
-    near_distance = -np.inf
-    far_distance = np.inf
-
-    near_axis = -1
-    near_sign = 0.0
-
-    far_axis = -1
-    far_sign = 0.0
-
-    epsilon = 1e-10
+    near_distance = -inf
+    far_distance = inf
+    near_axis = far_axis = -1
+    near_sign = far_sign = 0.0
 
     for dimension in range(3):
         component_origin = local_origin[dimension]
         component_direction = local_direction[dimension]
-        extent = half_extents[dimension]
+        extent = extents[dimension]
 
-        if abs(component_direction) < epsilon:
+        if abs(component_direction) < _EPSILON:
             if component_origin < -extent or component_origin > extent:
                 return None
-
             continue
 
-        first = (
-            -extent - component_origin
-        ) / component_direction
-
-        second = (
-            extent - component_origin
-        ) / component_direction
-
-        first_sign = -1.0
-        second_sign = 1.0
+        first = (-extent - component_origin) / component_direction
+        second = (extent - component_origin) / component_direction
+        first_sign, second_sign = -1.0, 1.0
 
         if first > second:
             first, second = second, first
@@ -277,373 +365,231 @@ def ray_obb_intersection(
         return None
 
     if near_distance >= 0:
-        distance = near_distance
-        hit_axis = near_axis
-        hit_sign = near_sign
+        distance, hit_axis, hit_sign = near_distance, near_axis, near_sign
     else:
-        # Ray started inside the box, so use the exit face.
-        distance = far_distance
-        hit_axis = far_axis
-        hit_sign = far_sign
+        distance, hit_axis, hit_sign = far_distance, far_axis, far_sign
 
-    if distance < 0 or distance > max_distance:
+    if distance > max_distance:
         return None
 
-    hit_position = origin + direction * distance
-
+    point = origin + direction * distance
     local_normal = np.zeros(3, dtype=float)
-
     if hit_axis >= 0:
         local_normal[hit_axis] = hit_sign
-
-    world_normal = (
+    normal = _normalise(
         local_x * local_normal[0]
         + local_y * local_normal[1]
         + local_z * local_normal[2]
     )
-
-    world_normal = _normalise(world_normal)
-
-    return (
-        float(distance),
-        hit_position,
-        world_normal,
-    )
+    return float(distance), point, normal
 
 
-def _visual_box_parameters(wrapper):
-    """
-    Return the world-space box parameters for an ordinary object without custom
-    colliders.
+def _visual_intersection(visual, origin, direction, max_distance):
+    if _looks_like_sphere(visual):
+        return ray_sphere_intersection(
+            origin, direction, visual.pos, visual.radius, max_distance
+        )
 
-    The visual object's width and height are used, while workingPos,
-    workingAxis and workingUp come from the existing prop() method.
-    """
-    visual = wrapper.out if hasattr(wrapper, "out") else wrapper
+    if _looks_like_cylinder(visual):
+        return ray_cylinder_intersection(
+            origin,
+            direction,
+            visual.pos,
+            visual.axis,
+            visual.radius,
+            max_distance,
+        )
 
-    if not hasattr(visual, "width") or not hasattr(visual, "height"):
-        return None
+    if all(hasattr(visual, name) for name in ("pos", "axis", "width", "height")):
+        return ray_obb_intersection(
+            origin,
+            direction,
+            visual.pos,
+            visual.axis,
+            getattr(visual, "up", vec(0, 1, 0)),
+            visual.width,
+            visual.height,
+            max_distance,
+        )
 
-    return (
-        _to_numpy(visual.pos),
-        _to_numpy(visual.axis),
-        _to_numpy(visual.up),
-        float(visual.width),
-        float(visual.height),
-    )
-
-
-def _is_group(value) -> bool:
-    """
-    Detect a group without importing or changing the existing group class.
-    """
-    return hasattr(value, "children") and not hasattr(value, "out")
-
-
-def _is_visual(value) -> bool:
-    """Return True for a raw VPython-like render object."""
-    return (
-        hasattr(value, "pos")
-        and hasattr(value, "axis")
-        and not _is_group(value)
-        and not hasattr(value, "out")
-    )
+    return None
 
 
-def _is_obj(value) -> bool:
-    """
-    Detect an obj wrapper without importing or changing the existing obj class.
-    """
-    return hasattr(value, "out") and (hasattr(value, "working_pos") or hasattr(value, "workingPos"))
-
-
-def _collect_ignore_values(
-    value,
-    ignored_groups,
-    ignored_wrappers,
-    ignored_visuals,
-):
+def _collect_ignore_values(value, ignored_groups, ignored_wrappers, ignored_visuals):
     if value is None:
         return
-
     if _is_group(value):
         ignored_groups.add(id(value))
         return
-
     if _is_obj(value):
         ignored_wrappers.add(id(value))
         return
-
-    if _is_visual(value):
-        ignored_visuals.add(id(value))
-        return
-
-    if isinstance(value, Iterable) and not isinstance(
-        value,
-        (str, bytes),
-    ):
+    if _is_iterable_container(value):
         for item in value:
             _collect_ignore_values(
-                item,
-                ignored_groups,
-                ignored_wrappers,
-                ignored_visuals,
+                item, ignored_groups, ignored_wrappers, ignored_visuals
             )
-
         return
-
     ignored_visuals.add(id(value))
 
 
 def build_ignore_sets(ignore=None):
-    ignored_groups = set()
-    ignored_wrappers = set()
-    ignored_visuals = set()
-
+    ignored_groups, ignored_wrappers, ignored_visuals = set(), set(), set()
     _collect_ignore_values(
-        ignore,
-        ignored_groups,
-        ignored_wrappers,
-        ignored_visuals,
+        ignore, ignored_groups, ignored_wrappers, ignored_visuals
     )
-
-    return (
-        ignored_groups,
-        ignored_wrappers,
-        ignored_visuals,
-    )
+    return ignored_groups, ignored_wrappers, ignored_visuals
 
 
 def _collect_candidates(
     value,
     output,
+    seen,
     ignored_groups,
     ignored_wrappers,
     ignored_visuals,
-    visited,
 ):
-    """Recursively collect groups, Obj wrappers, visuals and nested iterables."""
-    if value is None:
+    if value is None or id(value) in seen:
         return
-
-    value_id = id(value)
-    if value_id in visited:
-        return
+    seen.add(id(value))
 
     if _is_group(value):
-        visited.add(value_id)
-        if value_id in ignored_groups:
+        if id(value) in ignored_groups:
             return
-
-        for child in getattr(value, "children", []):
+        for child in value.children:
             _collect_candidates(
-                child, output, ignored_groups, ignored_wrappers,
-                ignored_visuals, visited,
+                child,
+                output,
+                seen,
+                ignored_groups,
+                ignored_wrappers,
+                ignored_visuals,
             )
-
-        child_groups = getattr(value, "child_groups", None)
-        if child_groups is None:
-            child_groups = getattr(value, "childGroups", [])
-
-        for child_group in child_groups:
+        for child_group in value.child_groups:
             _collect_candidates(
-                child_group, output, ignored_groups, ignored_wrappers,
-                ignored_visuals, visited,
+                child_group,
+                output,
+                seen,
+                ignored_groups,
+                ignored_wrappers,
+                ignored_visuals,
             )
         return
 
     if _is_obj(value):
-        visited.add(value_id)
-        if value_id in ignored_wrappers or id(value.out) in ignored_visuals:
+        if id(value) in ignored_wrappers or id(value.out) in ignored_visuals:
             return
-        output.append(value)
+        output.append((value, value.out))
         return
 
-    if _is_visual(value):
-        visited.add(value_id)
-        if value_id not in ignored_visuals:
-            output.append(value)
-        return
-
-    if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
-        visited.add(value_id)
+    if _is_iterable_container(value):
         for item in value:
             _collect_candidates(
-                item, output, ignored_groups, ignored_wrappers,
-                ignored_visuals, visited,
+                item,
+                output,
+                seen,
+                ignored_groups,
+                ignored_wrappers,
+                ignored_visuals,
             )
+        return
+
+    # Raw VPython primitive.
+    if id(value) not in ignored_visuals and hasattr(value, "pos"):
+        output.append((value, value))
 
 
 def raycast(
     groups,
     ray_origin,
     ray_direction,
-    max_distance=float("inf"),
+    max_distance=inf,
     ignore=None,
     ignored_objects=None,
     debug=False,
 ):
     """
-    Cast a ray against all objects in the supplied groups.
+    Cast a ray against Group trees, Obj wrappers, raw VPython primitives, or
+    nested iterables containing any of them.
 
-    When an obj has custom BoxCollider entries, each collider is transformed
-    into world space and tested separately.
-
-    When an obj has no custom colliders, its normal visual bounding box is used.
-
-    Both `ignore` and `ignored_objects` are accepted for compatibility.
+    Obj wrappers with custom BoxCollider entries use those colliders only.
+    Otherwise spheres and cylinders use exact rounded intersections and
+    box-like objects use oriented-box intersections.
     """
     if ignored_objects is not None:
-        if ignore is None:
-            ignore = ignored_objects
-        else:
-            ignore = [ignore, ignored_objects]
+        ignore = ignored_objects if ignore is None else [ignore, ignored_objects]
 
-    if _is_group(groups) or _is_obj(groups) or _is_visual(groups):
-        groups = [groups]
-
-    ignored_groups, ignored_wrappers, ignored_visuals = (
-        build_ignore_sets(ignore)
-    )
-
-    wrappers = []
+    ignored_groups, ignored_wrappers, ignored_visuals = build_ignore_sets(ignore)
+    candidates = []
     _collect_candidates(
         groups,
-        wrappers,
+        candidates,
+        set(),
         ignored_groups,
         ignored_wrappers,
         ignored_visuals,
-        set(),
     )
+
+    origin = _to_numpy(ray_origin)
+    direction = _normalise(ray_direction)
+    if np.linalg.norm(direction) < _EPSILON:
+        if debug:
+            print("[raycast] zero-length direction")
+        return None
 
     if debug:
         print(
-            f"[raycast] input type={type(groups).__name__}; "
-            f"collected {len(wrappers)} candidate object(s)"
+            f"[raycast {RAYCASTING_VERSION}] collected "
+            f"{len(candidates)} candidate object(s)"
         )
 
-    origin = _to_numpy(ray_origin)
-    direction = _normalise(_to_numpy(ray_direction))
+    nearest = None
 
-    if np.linalg.norm(direction) < 1e-12:
-        return None
-
-    nearest_hit = None
-
-    for index, wrapper in enumerate(wrappers):
-        visual = wrapper.out if hasattr(wrapper, "out") else wrapper
-        colliders = getattr(wrapper, "colliders", None)
-
-        if debug:
-            print(
-                f"[raycast] candidate {index}: type={type(visual).__name__}, "
-                f"pos={getattr(visual, 'pos', None)}, "
-                f"axis={getattr(visual, 'axis', None)}, "
-                f"width={getattr(visual, 'width', None)}, "
-                f"height={getattr(visual, 'height', None)}, "
-                f"colliders={len(colliders) if colliders else 0}"
-            )
+    for index, (owner, visual) in enumerate(candidates):
+        colliders = getattr(owner, "colliders", None) if _is_obj(owner) else None
+        results = []
 
         if colliders:
             for collider in colliders:
-                world_parameters = _collider_world_transform(
-                    wrapper,
-                    collider,
-                )
-
-                if world_parameters is None:
+                parameters = _collider_world_transform(owner, collider)
+                if parameters is None:
                     continue
-
-                (
-                    collider_position,
-                    collider_axis,
-                    collider_up,
-                    collider_width,
-                    collider_height,
-                ) = world_parameters
-
                 result = ray_obb_intersection(
-                    ray_origin=origin,
-                    ray_direction=direction,
-                    box_position=collider_position,
-                    box_axis=collider_axis,
-                    box_up=collider_up,
-                    box_width=collider_width,
-                    box_height=collider_height,
-                    max_distance=max_distance,
+                    origin, direction, *parameters, max_distance=max_distance
                 )
+                if result is not None:
+                    results.append((result, collider))
+        else:
+            result = _visual_intersection(
+                visual, origin, direction, max_distance
+            )
+            if result is not None:
+                results.append((result, None))
 
-                if result is None:
-                    continue
-
-                distance, point, normal = result
-
-                if (
-                    nearest_hit is None
-                    or distance < nearest_hit.distance
-                ):
-                    nearest_hit = RayHit(
-                        obj=wrapper,
-                        visual=visual,
-                        collider=collider,
-                        distance=distance,
-                        point=_to_vpython(point),
-                        normal=_to_vpython(normal),
-                    )
-
-            # Do not also raycast against the compound's overall bounding box.
-            continue
-
-        parameters = _visual_box_parameters(wrapper)
-
-        if parameters is None:
-            if debug:
-                print(f"[raycast] candidate {index} skipped: no width/height")
-            continue
-
-        (
-            visual_position,
-            visual_axis,
-            visual_up,
-            visual_width,
-            visual_height,
-        ) = parameters
-
-        result = ray_obb_intersection(
-            ray_origin=origin,
-            ray_direction=direction,
-            box_position=visual_position,
-            box_axis=visual_axis,
-            box_up=visual_up,
-            box_width=visual_width,
-            box_height=visual_height,
-            max_distance=max_distance,
-        )
-
-        if result is None:
-            if debug:
-                print(f"[raycast] candidate {index}: no intersection")
-            continue
-
-        distance, point, normal = result
-
-        if nearest_hit is None or distance < nearest_hit.distance:
-            nearest_hit = RayHit(
-                obj=wrapper,
-                visual=visual,
-                collider=None,
-                distance=distance,
-                point=_to_vpython(point),
-                normal=_to_vpython(normal),
+        if debug:
+            print(
+                f"[raycast] candidate {index}: "
+                f"type={_visual_type_name(visual)}, hits={len(results)}"
             )
 
+        for (distance, point, normal), collider in results:
+            if nearest is None or distance < nearest.distance:
+                nearest = RayHit(
+                    obj=owner,
+                    visual=visual,
+                    distance=distance,
+                    point=_to_vpython(point),
+                    normal=_to_vpython(normal),
+                    collider=collider,
+                )
+
     if debug:
-        if nearest_hit is None:
+        if nearest is None:
             print("[raycast] result: no hit")
         else:
             print(
-                f"[raycast] result: hit at distance {nearest_hit.distance}, "
-                f"point={nearest_hit.point}"
+                f"[raycast] result: {_visual_type_name(nearest.visual)} "
+                f"at distance {nearest.distance}"
             )
 
-    return nearest_hit
+    return nearest
