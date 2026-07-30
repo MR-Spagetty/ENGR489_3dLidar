@@ -9,8 +9,13 @@ LASER_ROT_VEL_RAD_PER_SEC = LASER_ROT_VEL_RPM/60 * radians(360)
 LASER_SAMPLE_RATE_Hz = 8000 # Hz
 LASER_POINT_RETENTION = 40000
 
+ALT_YAW_EXTRA = 0 # extra offset from alt yaw system for future
+
 def mm_to_cm(mm):
     return mm/10
+
+def rgbCol(r: int, g:int, b:int):
+    return vec(r, g, b)/255
 
 LASER_ROT_VEL = LASER_ROT_VEL_RAD_PER_SEC / RATE
 LASER_POINT_RATE = RATE / min(RATE, LASER_SAMPLE_RATE_Hz)
@@ -36,6 +41,9 @@ class group():
         self.rotX = 0.
         self.rotY = 0.
         self.rotZ = 0.
+        self.childGroups = []
+        if (parent is not None):
+            parent.childGroups.append(self)
 
     def get_rot(self):
 
@@ -56,6 +64,11 @@ class group():
             ])
         R_combined = R_x @ R_y @ R_z
         return R_combined
+
+    def prop(self):
+        for child in self.childGroups:
+            child.prop()
+        self.apply()
 
     def apply(self, children: None|list[obj] = None):
         frm_child = False
@@ -93,33 +106,51 @@ origin_y = arrow(axis=vec(0,0,3), color=color.blue)
 
 laser_trail_source = sphere( make_trail=True, trail_type="points", trail_radius=0.1, interval=LASER_POINT_RATE, retain = LASER_POINT_RETENTION , color=color.red, opacity=0)
 laser_pose = arrow(shaftwidth=0.2)
-laser_pose.length = 20
 laser_pose.color = color.red
 
-lidar_center_pos = vec(5, 0, 0)
+lidar_center_pos = vec(0, 0, 0)
 
-altYaw = group(None, [])
-pitch = group(altYaw, [
-    obj(point(pos=vec(0, -1, 0), axis=vec(0, 1, 0)), cylinder(radius=10, length=1)),
-    obj(point(pos=lidar_center_pos+vec(0, mm_to_cm(31.5/2), 0), axis=vec(mm_to_cm(70.28), 0, 0)), box(height=mm_to_cm(31.5), width=mm_to_cm(70.28)))
+robot = group(None, [
+    obj(point(), compound([
+        box(axis=vec(mm_to_cm(48), 0, 0), width=mm_to_cm(265), height=mm_to_cm(48)),
+        box(width=mm_to_cm(265), height=mm_to_cm(48), pos=vec(mm_to_cm((-432+48)/2+24), 0, 0), axis=vec(mm_to_cm(48), 0, 0)),
+        box(pos= vec(0, 0, mm_to_cm(48/2 + 265/2)), axis=vec(mm_to_cm(432), 0, 0), width=mm_to_cm(48), height=mm_to_cm(48)),
+        box(pos= vec(0, 0, -mm_to_cm(48/2 + 265/2)), axis=vec(mm_to_cm(432), 0, 0), width=mm_to_cm(48), height=mm_to_cm(48)),
+        box(pos=vec(0, mm_to_cm((48+144)/2), 0), axis=vec(0, mm_to_cm(144), 0), width=mm_to_cm(24), height=mm_to_cm(24))
+        ], color=color.gray(0.6), origin = vec(0, 0, 0)))
     ])
-pitch.offset = vec(0, 10, 0)
+
+wheel_PB = group(robot, [
+    ])
+wheel_PB.offset=vec(1, 0, 1)
+wheel_PS = group(robot, [
+    ])
+wheel_PS.offset=vec(-1, 0, 1)
+
+altYaw = group(robot, [
+    obj(point(pos=vec(0, mm_to_cm(5/2), 0), axis=vec(0, mm_to_cm(5), 0)), box(width=mm_to_cm(30), height=mm_to_cm(30)))
+    ])
+altYaw.offset = vec(0, mm_to_cm(144+48/2+ALT_YAW_EXTRA), 0)
+
+pitch = group(altYaw, [
+    obj(point(pos=vec(0, mm_to_cm(-5/2), 0), axis=vec(0, mm_to_cm(5), 0)), cylinder(radius=mm_to_cm(133/2))),
+    obj(point(pos=lidar_center_pos+vec(0, mm_to_cm((31.5+5)/2), 0), axis=vec(mm_to_cm(70.28), 0, 0)), box(height=mm_to_cm(31.5), width=mm_to_cm(70.28)))
+    ])
+pitch.offset = vec(0, mm_to_cm(76.9102+14.5), 0)
+
 yaw = group(pitch, [
     obj(arrow(pos=vec(0, mm_to_cm(42-31.5), 0), axis=vec(1, 0, 0)*15), laser_pose),
-    obj(point(pos = vec(0, 0, 0), axis = vec(0, 1, 0)), cylinder(radius=mm_to_cm(70.04/2), length=mm_to_cm(51-31.5), color=color.blue))
+    obj(point(pos = vec(0, 0, 0), axis = vec(0, mm_to_cm(51-31.5), 0)), cylinder(radius=mm_to_cm(70.04/2), color=color.blue))
     ])
-yaw.offset = lidar_center_pos + vec(0, mm_to_cm(31.5), 0)
+yaw.offset = lidar_center_pos + vec(0, mm_to_cm(31.5+5/2), 0)
 
 
-groups = [
-        yaw, pitch, altYaw
-        ]
 while True:
     rate(RATE)
 
     yaw.rotY += LASER_ROT_VEL
+    pitch.rotZ += radians(10)/RATE
 
-    for g in groups:
-        g.apply()
+    robot.prop()
 
     laser_trail_source.pos = laser_pose.pos + laser_pose.axis.norm()* LASER_DIST
