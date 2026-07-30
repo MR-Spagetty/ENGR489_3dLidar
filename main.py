@@ -3,6 +3,7 @@ from groups import *
 from utils import *
 from raycasting import raycast, BoxCollider
 import numpy as np
+import time
 
 RATE = 8000
 LASER_DIST = 20
@@ -145,11 +146,33 @@ def toggleEnv(evt):
         env.toggle_visible()
 
 scene.bind('keydown', toggleEnv)
+fps_label = label(
+    pixel_pos=True,             # Position using screen pixels
+    pos=vec(200, 20, 0),     # 20px from left, 580px from bottom
+    text="FPS: Calculating...",
+    color=color.green,          # Green text
+    box=False,                  # Remove background box
+    line=False,                 # Remove pointer line
+    height=16                   # Font size
+)
 
+# Initialize time tracking variables
+prev_time = time.time()
+frame_count = 0
 tick = 0
 env.prop()
 while True:
     rate(RATE)
+
+    # framerate counter
+    frame_count += 1
+    current_time = time.time()
+    elapsed = current_time - prev_time
+    if elapsed >= 0.5:
+        true_fps = frame_count / elapsed
+        fps_label.text = f"FPS: {true_fps:.1f}"
+        frame_count = 0
+        prev_time = current_time
 
     yaw.rotY += LASER_ROT_VEL
     pitch.rotZ -= radians(10)/RATE
