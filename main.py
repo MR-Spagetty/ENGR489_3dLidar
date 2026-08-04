@@ -105,11 +105,17 @@ frame_visual = compound(
     origin=vec(0, 0, 0),
     color=color.gray(0.6),
 )
-
+camera_ref = point()
+camera_ref.visible = False
+fwbw_ref = point()
+lfrt_ref = point()
 robot = group(world, [
     obj(point(pos=vec(0, 0, 0), axis=vec(1, 0, 0)), frame_visual, colliders=frame_colliders),
     obj(point(pos=vec(mm_to_cm((-432+130)/2), mm_to_cm((48+95)/2), mm_to_cm(48/2+265/2)), axis=vec(0, mm_to_cm(95), 0)), box(width=mm_to_cm(65), height=mm_to_cm(130), color=rgb_col(200, 30, 30))),
-    obj(point(pos=vec(mm_to_cm((-432-3)/2+24), mm_to_cm((150-48)/2), 0), axis=vec(mm_to_cm(3), 0, 0)), box(width=mm_to_cm(150), height=mm_to_cm(150), color=rgb_col(200, 30, 30)))
+    obj(point(pos=vec(mm_to_cm((-432-3)/2+24), mm_to_cm((150-48)/2), 0), axis=vec(mm_to_cm(3), 0, 0)), box(width=mm_to_cm(150), height=mm_to_cm(150), color=rgb_col(200, 30, 30))),
+    obj(point(), camera_ref),
+    obj(point(), fwbw_ref),
+    obj(point(axis=vec(0, 0, 1)), lfrt_ref)
 ])
 
 wheel_PB = group(robot, [
@@ -138,8 +144,20 @@ yaw.offset = lidar_center_pos + vec(0, mm_to_cm(31.5+5/2), 0)
 
 def toggleEnv(evt):
     key = evt.key
-    if key == "q":
+    if key == "tab":
         env.toggle_visible()
+    elif key == "w":
+        robot.offset += fwbw_ref.axis
+    elif key == "s":
+        robot.offset -= fwbw_ref.axis
+    elif key == "a":
+        robot.offset -= lfrt_ref.axis
+    elif key == "d":
+        robot.offset += lfrt_ref.axis
+    elif key == "q":
+        robot.rot_y += radians(1)
+    elif key == "e":
+        robot.rot_y -= radians(1)
 
 scene.bind('keydown', toggleEnv)
 fps_label = label(
@@ -174,6 +192,7 @@ while True:
     pitch.rotZ -= radians(10)/RATE
 
     robot.prop()
+    scene.center = camera_ref.pos
     tick += 1
     if tick >= LASER_POINT_RATE:
         tick = 0
