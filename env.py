@@ -23,7 +23,10 @@ def table(pos = vec(0, 0, 0)):
         obj(point(pos = vec(0, 56+1.5, -40+5+8-0.1), axis=vec(0, 3, 0)), box(height=160, width=mm_to_cm(2), color=color.gray(0.2))),
         obj(point(pos = vec(0, 56+4, -40+5+0.1), axis=vec(0, 8, 0)), box(height=160, width=mm_to_cm(2), color=color.gray(0.2))),
         ])
-
+    table.offset = pos
     return table
 
-table1 = table(vec(40, 0, 0))
+table(vec(  0, 0, -90))
+table(vec(160, 0, -90))
+table(vec(320, 0, -90))
+table(vec(380, 0, -90))
