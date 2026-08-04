@@ -1,6 +1,6 @@
 import numpy as np
 
-from vpython import vec
+from vpython import vec, sphere, color
 
 def mm_to_cm(mm: float):
     return mm/10
@@ -63,3 +63,6 @@ def euler_rotation_matrix(rotation_x: float, rotation_y: float, rotation_z: floa
     rotate_z = rotation_matrix(np.array([0.0, 0.0, 1.0]), rotation_z)
 
     return rotate_z @ rotate_y @ rotate_x
+
+def point(pos=vec(0, 0, 0), color=color.white, axis = vec(1, 0, 0)):
+    return sphere(pos=pos, color=color, axis=axis)

@@ -4,6 +4,7 @@ from utils import *
 from raycasting import raycast, BoxCollider
 import numpy as np
 import time
+from env import env
 
 RATE = 8000
 LASER_DIST = 20
@@ -18,9 +19,6 @@ ALT_YAW_EXTRA = 0 # extra offset from alt yaw system for future
 LASER_ROT_VEL = LASER_ROT_VEL_RAD_PER_SEC / RATE
 LASER_POINT_RATE = RATE / min(RATE, LASER_SAMPLE_RATE_Hz)
 
-def point(pos=vec(0, 0, 0), color=color.white, axis = vec(1, 0, 0)):
-    return sphere(pos=pos, color=color, axis=axis)
-
 origin_x = arrow(axis=vec(3,0,0), color=color.green)
 origin_y = arrow(axis=vec(0,3,0), color=color.yellow)
 origin_y = arrow(axis=vec(0,0,3), color=color.blue)
@@ -31,10 +29,8 @@ laser_pose.color = color.red
 
 lidar_center_pos = vec(0, 0, 0)
 world = group(None, [])
-env = group(world, [
-    obj(point(pos = vec (20, 0, 0), axis=vec(0, 10, 0)), cylinder(radius=3)),
-    obj(point(pos = vec (20, 15, 0)), sphere(radius=3))
-    ])
+env.parent = world
+world.child_groups.append(env)
 
 frame_colliders = [
     # Front cross rail
