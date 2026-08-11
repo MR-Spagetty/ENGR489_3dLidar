@@ -52,7 +52,7 @@ def drawersB(pos = vec(0, 0, 0), rotX=0, rotY=0, rotZ=0):
         obj(point(pos=(56.5/2-2.5,2, -(47.5/2-4.5)), axis=vec(0,0,1)*4), cylinder(radius=5, color=color.gray(0.3))),
         obj(point(pos=(-(56.5/2-2.5),2, (47.5/2-4.5)), axis=vec(0,0,1)*4), cylinder(radius=5, color=color.gray(0.3))),
         obj(point(pos=(-(56.5/2-2.5),2, -(47.5/2-4.5)), axis=vec(0,0,1)*4), cylinder(radius=5, color=color.gray(0.3)))
-        # possibly add the front curve somehow with a boolean shape
+        # possibly add the front curve somehow with a boolean shape if so diam is 3025.42mm and offset relative to front flat face is 1497.71mm
         ])
     drawer.offset = pos
     drawer.rotX = rotX
