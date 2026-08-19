@@ -128,7 +128,7 @@ def generate_launch_description():
 		joy_node,
 		teleop_node,
 	]
-	ultrasonic_addr= [0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27]
+	"""ultrasonic_addr= [0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27]
 	for addr in ultrasonic_addr: 
 		ultrasonic_node = Node(
 		package='ultrasonics',
@@ -137,7 +137,7 @@ def generate_launch_description():
 		parameters= [{'addr':addr}]
 		)
 		action_list.append(ultrasonic_node)
-	
+	"""
 	
 	return LaunchDescription(action_list)
 
