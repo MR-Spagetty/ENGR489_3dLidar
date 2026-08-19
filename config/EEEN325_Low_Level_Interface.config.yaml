@@ -1,0 +1,17 @@
+/low_level_ros_interface:
+  ros__parameters:
+    roboclaw:
+      device: /dev/ttyAMA0 # Address of the roboclaw serial port.
+      baud: 38400 # buadrate of the roboclaw serial port.
+      timeout: 10 # serial port timeout in seconds.
+      retries: 1 # number of times to retry a command if CRC failure or timeout.
+    motor:
+      ppr: 537.7 # number of motor encoder pulses per wheel revolution
+    robot:
+      lengthX: 0.1680 # width between the centre of robot and the wheels in the x-direction (m).
+      lengthY: 0.2075 # width between the centre of the robot and the wheels in the y-direction (m).
+      wheelDiameter: 0.0960 # The diameter of the mecanum wheels (m).
+
+# def __init__(self,device: str = '/dev/ttyAMA0', baud: int = 38400, timeout: int = 0, retries: int = 1,l_x: float = 0.1680, l_y: float = 0.2075, wheelDiameter: float = 0.096):
+   
+
