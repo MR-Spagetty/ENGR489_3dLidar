@@ -1,3 +1,4 @@
+from glob import glob
 from setuptools import setup
 
 package_name = 'eeen489_robot'
@@ -9,6 +10,8 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
+        ('share/' + package_name + '/config', glob('config/*.yaml')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -16,7 +19,6 @@ setup(
     maintainer_email='you@example.com',
     description='ROS2 robot package for the ENGR489 platform.',
     license='Apache-2.0',
-    tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'low_level_ros_interface_node = eeen489_robot.low_level_ros_interface_node:main',
