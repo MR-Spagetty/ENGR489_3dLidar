@@ -1,0 +1,30 @@
+lidar_3d_pointcloud_node:
+  ros__parameters:
+    scan_topic: "/scan"
+    imu_a_topic: "/imu_a"
+    imu_b_topic: "/imu_b"
+    output_topic: "/point_cloud_3d"
+    pose_topic: "/lidar_pose"
+    frame_id: "laser"
+    reference_frame: "base_link"
+
+    stepper_enabled: true
+    stepper_step_pin: 6
+    stepper_dir_pin: 12
+    stepper_steps_per_rev: 200
+    stepper_gear_ratio: 1.0
+    stepper_microsteps: 1
+    stepper_step_delay_s: 0.0005
+    stepper_max_pitch_rad: 0.5235987756
+    stepper_home_pitch_rad: 0.0
+
+dual_imu_publisher_node:
+  ros__parameters:
+    i2c_bus: 1
+    sensor_a_address: 106
+    sensor_b_address: 107
+    imu_a_topic: "/imu_a"
+    imu_b_topic: "/imu_b"
+    frame_id_a: "imu_a_link"
+    frame_id_b: "imu_b_link"
+    publish_rate_hz: 100.0

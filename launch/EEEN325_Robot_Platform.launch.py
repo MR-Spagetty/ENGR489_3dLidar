@@ -112,6 +112,21 @@ def generate_launch_description():
 	A1M8Lidar = IncludeLaunchDescription(  
 		PythonLaunchDescriptionSource([PathJoinSubstitution([FindPackageShare('sllidar_ros2'),'launch','sllidar_a1_launch.py'])])
 		)
+	config_file = PathJoinSubstitution([FindPackageShare('eeen489_robot'),'config','lidar_3d_pointcloud_config.yaml'])
+	dual_imu_publisher = Node(
+		package='eeen489_robot',
+		executable='dual_imu_publisher_node',
+		name='dual_imu_publisher',
+		output='screen',
+		parameters=[config_file],
+	)
+	lidar_3d_pointcloud = Node(
+		package='eeen489_robot',
+		executable='lidar_3d_pointcloud_node',
+		name='lidar_3d_pointcloud',
+		output='screen',
+		parameters=[config_file],
+	)
 	action_list =[
 		xbox_config_filepath_arg,
 		#xbox_series_twist,
@@ -121,6 +136,8 @@ def generate_launch_description():
 		high_level_interface,
 		eeen325_transforms,
 		A1M8Lidar,
+		dual_imu_publisher,
+		lidar_3d_pointcloud,
 		
 		twist_mux_config_filepath_arg,
 		twist_mux,
