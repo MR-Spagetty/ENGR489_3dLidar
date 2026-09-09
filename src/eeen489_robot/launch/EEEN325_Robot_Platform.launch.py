@@ -97,7 +97,7 @@ def generate_launch_description():
 	)
 	# Set the transforms
 	eeen325_transforms = IncludeLaunchDescription(
-		PythonLaunchDescriptionSource([PathJoinSubstitution([FindPackageShare('eeen489_robot'),'EEEN325_Robot_static_transform.launch.py'])])
+		PythonLaunchDescriptionSource([PathJoinSubstitution([FindPackageShare('eeen489_robot'),'launch','EEEN325_Robot_static_transform.launch.py'])])
 		)
 	# to use a different directory for the joystick launch file edit config_filepath
 	xbox_series_twist = GroupAction(
