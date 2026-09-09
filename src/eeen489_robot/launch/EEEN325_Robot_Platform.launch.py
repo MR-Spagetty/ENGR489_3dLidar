@@ -35,9 +35,9 @@ from launch_ros.substitutions import FindPackageShare
 from launch.substitutions import PathJoinSubstitution
 
 def generate_launch_description():
-	xbox_config_location = PathJoinSubstitution([FindPackageShare("eeen489_robot"),"EEEN325_XBOX_series.config.yaml"])
-	robot_config_location = PathJoinSubstitution([FindPackageShare("eeen489_robot"),"EEEN325_Low_Level_Interface.config.yaml"])
-	twist_mux_config_location = PathJoinSubstitution([FindPackageShare("eeen489_robot"),"twist_mux.config.yaml"])
+	xbox_config_location = PathJoinSubstitution([FindPackageShare("eeen489_robot"),"config","EEEN325_XBOX_series.config.yaml"])
+	robot_config_location = PathJoinSubstitution([FindPackageShare("eeen489_robot"),"config","EEEN325_Low_Level_Interface.config.yaml"])
+	twist_mux_config_location = PathJoinSubstitution([FindPackageShare("eeen489_robot"),"config","twist_mux.config.yaml"])
 	# xbox_config_location = os.path.join(
     #   get_package_share_directory('low_level_ros_interface'),
     #   'config',
