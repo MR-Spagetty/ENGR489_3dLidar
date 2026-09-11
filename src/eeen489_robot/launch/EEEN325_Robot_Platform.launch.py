@@ -72,18 +72,18 @@ def generate_launch_description():
 		executable='twist_mux',
 		name='twist_mux',
 		remappings=[
-			('/cmd_vel_out','/cmd_vel_roboclaw'),	
+			('/cmd_vel_out','/cmd_vel_roboclaw'),
 		],
 		parameters = [twist_mux_config],
-	
-	
+
+
 )
-	
+
 	joy_node = Node(
 		package='joy',
 		executable='joy_node',
 		name='joy_node',
-	
+
 	)
 	teleop_node = Node(
 		package='teleop_twist_joy',
@@ -91,14 +91,16 @@ def generate_launch_description():
 		name='teleop_twist_joy_node',
 		remappings=[
             ('/cmd_vel', '/cmd_vel_joy'),
-	    
+
 		],
 		parameters=[xbox_config]
 	)
 	# Set the transforms
+	# TODO: Requires tf2_ros package - uncomment when available
 	eeen325_transforms = IncludeLaunchDescription(
 		PythonLaunchDescriptionSource([PathJoinSubstitution([FindPackageShare('eeen489_robot'),'launch','EEEN325_Robot_static_transform.launch.py'])])
 		)
+	# eeen325_transforms = None  # Disabled for now
 	# to use a different directory for the joystick launch file edit config_filepath
 	xbox_series_twist = GroupAction(
 		actions=[
@@ -108,8 +110,8 @@ def generate_launch_description():
 		PythonLaunchDescriptionSource([PathJoinSubstitution([FindPackageShare('teleop_twist_joy'), 'launch', 'teleop-launch.py'])])
 			)
 		]
-	)	
-	A1M8Lidar = IncludeLaunchDescription(  
+	)
+	A1M8Lidar = IncludeLaunchDescription(
 		PythonLaunchDescriptionSource([PathJoinSubstitution([FindPackageShare('sllidar_ros2'),'launch','sllidar_a1_launch.py'])])
 		)
 	config_file = PathJoinSubstitution([FindPackageShare('eeen489_robot'),'config','lidar_3d_pointcloud_config.yaml'])
@@ -130,32 +132,32 @@ def generate_launch_description():
 	action_list =[
 		xbox_config_filepath_arg,
 		#xbox_series_twist,
-		
-		
+
+
 		low_level_interface,
 		high_level_interface,
-		eeen325_transforms,
+		eeen325_transforms,  # tf2_ros now built
 		A1M8Lidar,
 		dual_imu_publisher,
 		lidar_3d_pointcloud,
-		
-		twist_mux_config_filepath_arg,
-		twist_mux,
-		
-		joy_node,
-		teleop_node,
+
+		# twist_mux_config_filepath_arg,  # TODO: twist_mux not built
+		# twist_mux,  # TODO: twist_mux not built
+
+		# joy_node,  # TODO: joy package not built
+		# teleop_node,  # TODO: teleop_twist_joy not built
 	]
 	"""ultrasonic_addr= [0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27]
-	for addr in ultrasonic_addr: 
+	for addr in ultrasonic_addr:
 		ultrasonic_node = Node(
 		package='ultrasonics',
 		executable='ultrasonic_publisher',
-		name=f'ultrasonic_publisher_{addr}', 
+		name=f'ultrasonic_publisher_{addr}',
 		parameters= [{'addr':addr}]
 		)
 		action_list.append(ultrasonic_node)
 	"""
-	
+
 	return LaunchDescription(action_list)
 
-			
+

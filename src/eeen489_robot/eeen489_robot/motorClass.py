@@ -1,4 +1,4 @@
-from roboclaw_3 import Roboclaw
+from eeen489_robot.roboclaw_3 import Roboclaw
 import sys
 import math
  

@@ -3,11 +3,11 @@ import time
 import os
 import numpy as np
 from geometry_msgs.msg import Twist
-from roboclaw_3 import Roboclaw
+from eeen489_robot.roboclaw_3 import Roboclaw
 import rclpy
 from rclpy.node import Node
 
-from motorClass import MotorClass
+from eeen489_robot.motorClass import MotorClass
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.parameter import Parameter
 from rcl_interfaces.msg import SetParametersResult

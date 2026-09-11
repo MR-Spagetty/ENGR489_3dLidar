@@ -1,4 +1,4 @@
-lidar_3d_pointcloud_node:
+lidar_3d_pointcloud:
   ros__parameters:
     scan_topic: "/scan"
     imu_a_topic: "/imu_a"
@@ -11,14 +11,20 @@ lidar_3d_pointcloud_node:
     stepper_enabled: true
     stepper_step_pin: 6
     stepper_dir_pin: 12
+    stepper_enable_pin: -1
+    stepper_enable_active_low: true
+    stepper_dir_invert: false
+    stepper_test_steps: 100
     stepper_steps_per_rev: 200
     stepper_gear_ratio: 1.0
     stepper_microsteps: 1
-    stepper_step_delay_s: 0.0005
+    stepper_step_delay_s: 0.001
+    stepper_max_rate_hz: 500.0
+    stepper_min_move_rad: 0.002
     stepper_max_pitch_rad: 0.5235987756
     stepper_home_pitch_rad: 0.0
 
-dual_imu_publisher_node:
+dual_imu_publisher:
   ros__parameters:
     i2c_bus: 1
     sensor_a_address: 106

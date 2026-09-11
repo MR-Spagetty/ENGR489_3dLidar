@@ -38,7 +38,7 @@ class localOdometryPublisher(Node):
             10
         )
         # Initialize the transform broadcaster
-        self.tf_broadcaster = TransformBroadcaster(self) 
+        self.tf_broadcaster = TransformBroadcaster(self)
         self.x = 0.0
         self.y = 0.0
         self.yaw = 0.0

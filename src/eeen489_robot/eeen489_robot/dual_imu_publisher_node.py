@@ -9,8 +9,11 @@ from sensor_msgs.msg import Imu
 
 try:
     from eeen489_robot.locked_i2c_bus import LockedI2CBus
-except ImportError:
-    from locked_i2c_bus import LockedI2CBus
+except (ImportError, ModuleNotFoundError):
+    try:
+        from .locked_i2c_bus import LockedI2CBus
+    except (ImportError, ModuleNotFoundError):
+        from locked_i2c_bus import LockedI2CBus
 
 try:
     import adafruit_lsm6ds.lsm6dsox as lsm6dsox
@@ -49,8 +52,7 @@ class DualImuPublisherNode(Node):
         rate = self.get_parameter('publish_rate_hz').value
 
         self.get_logger().info(
-            'Initializing dual LSM6DSOX IMU stream on I2C bus %d',
-            self.bus_id,
+            f'Initializing dual LSM6DSOX IMU stream on I2C bus {self.bus_id}'
         )
 
         self.i2c = LockedI2CBus(self.bus_id)
@@ -62,9 +64,7 @@ class DualImuPublisherNode(Node):
         self.timer = self.create_timer(1.0 / rate, self.timer_callback)
 
         self.get_logger().info(
-            'Publishing sensor A on %s and sensor B on %s',
-            imu_a_topic,
-            imu_b_topic,
+            f'Publishing sensor A on {imu_a_topic} and sensor B on {imu_b_topic}'
         )
 
     def make_imu_msg(self, sensor, frame_id):
