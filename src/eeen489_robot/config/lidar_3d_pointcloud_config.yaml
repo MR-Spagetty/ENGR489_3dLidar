@@ -13,18 +13,20 @@ lidar_3d_pointcloud:
     stepper_dir_pin: 12
     stepper_enable_pin: -1
     stepper_enable_active_low: true
-    stepper_dir_invert: false
+    stepper_dir_invert: true
     stepper_test_steps: 100
-    stepper_steps_per_rev: 200
-    stepper_gear_ratio: 1.0
-    stepper_microsteps: 1
+    stepper_steps_per_rev: 32           # 28BYJ-48 geared stepper: 32 steps per motor revolution
+    stepper_gear_ratio: 64.0            # Internal 1:64 gearbox on the 28BYJ-48
+    stepper_microsteps: 1               # 28BYJ-48 on a ULN2003 is not microstepped in this setup.
+                                       # Using 2 here doubles the commanded motion and makes a 45° request behave like 90°.
     stepper_step_delay_s: 0.001
     stepper_max_rate_hz: 500.0
     stepper_min_move_rad: 0.002
     stepper_min_pitch_deg: -45.0  # lower scan limit in degrees, relative to the platform pitch zero
     stepper_max_pitch_deg: 45.0   # upper scan limit in degrees, relative to the platform pitch zero
-    stepper_home_pitch_deg: 0.0   # physical stepper angle in degrees that corresponds to relative pitch 0.
-                                # If the motor is mounted with a 90deg offset, set this to 90 or -90 as required.
+    stepper_home_pitch_deg: 0.0   # default offset used when a measured zero is not available.
+    stepper_use_live_zero: true   # if true, average the live IMU relative pitch at startup and use it as the zero reference.
+                                # This is useful when the platform is only approximately level and can drift slightly.
 
 dual_imu_publisher:
   ros__parameters:
