@@ -33,6 +33,18 @@ lidar_3d_pointcloud:
     stepper_scan_pi_max_step_deg: 2.5  # max PI command magnitude per loop.
     stepper_scan_pi_integral_limit_deg: 6.0  # anti-windup clamp for PI integral term.
     stepper_scan_escape_step_deg: 3.0  # immediate inward target offset after endpoint reversal.
+    output_pitch_sign: 1.0  # legacy fallback for pitch sign; overridden by the specific cloud/pose pitch signs below.
+    output_cloud_pitch_sign: 1.0  # +1/-1 pitch sign used when rotating scan into 3D cloud.
+    output_pose_pitch_sign: -1.0  # +1/-1 pitch sign used when publishing lidar pose orientation.
+    output_pose_roll_offset_deg: 0.0  # additive roll offset for published pose frame.
+    output_pose_pitch_offset_deg: 0.0  # additive pitch offset for published pose frame.
+    output_pose_yaw_offset_deg: 180.0  # additive yaw offset for pose orientation.
+    output_cloud_roll_offset_deg: 0.0  # additive roll offset for cloud transform.
+    output_cloud_pitch_offset_deg: 0.0  # additive pitch offset for cloud transform.
+    output_cloud_yaw_offset_deg: 180.0  # additive yaw offset for cloud transform.
+    output_cloud_sign_x: -1.0  # +1/-1 for cloud X axis (forward/backward inversion).
+    output_cloud_sign_y: -1.0  # +1/-1 for cloud Y axis (left/right inversion).
+    output_cloud_sign_z: 1.0  # +1/-1 for cloud Z axis (up/down inversion).
     stepper_home_pitch_deg: 0.0   # target IMU-relative pitch at home (0 = lidar IMU level with robot-body IMU).
     stepper_use_live_zero: true   # if true, wait for IMUs and actively home to stepper_home_pitch_deg.
                   # if false, skip active homing and use stepper_home_pitch_deg as static center.

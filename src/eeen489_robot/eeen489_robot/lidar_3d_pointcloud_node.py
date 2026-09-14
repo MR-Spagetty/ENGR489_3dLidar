@@ -87,6 +87,18 @@ class Lidar3DCloudNode(Node):
         self.declare_parameter('stepper_scan_pi_max_step_deg', 1.5, descriptor=numeric_param_descriptor)
         self.declare_parameter('stepper_scan_pi_integral_limit_deg', 10.0, descriptor=numeric_param_descriptor)
         self.declare_parameter('stepper_scan_escape_step_deg', 2.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_pitch_sign', 1.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_cloud_pitch_sign', 1.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_pose_pitch_sign', 1.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_cloud_sign_x', 1.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_cloud_sign_y', 1.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_cloud_sign_z', 1.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_pose_roll_offset_deg', 0.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_pose_pitch_offset_deg', 0.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_pose_yaw_offset_deg', 0.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_cloud_roll_offset_deg', 0.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_cloud_pitch_offset_deg', 0.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_cloud_yaw_offset_deg', 0.0, descriptor=numeric_param_descriptor)
 
         scan_topic = self.get_parameter('scan_topic').value
         imu_a_topic = self.get_parameter('imu_a_topic').value
@@ -139,6 +151,36 @@ class Lidar3DCloudNode(Node):
         self.stepper_scan_escape_step_deg = self._get_float_parameter(
             'stepper_scan_escape_step_deg', 2.0
         )
+        legacy_output_pitch_sign = self._sign_from_value(
+            self._get_float_parameter('output_pitch_sign', 1.0)
+        )
+        self.output_cloud_pitch_sign = self._sign_from_value(
+            self._get_float_parameter('output_cloud_pitch_sign', legacy_output_pitch_sign)
+        )
+        self.output_pose_pitch_sign = self._sign_from_value(
+            self._get_float_parameter('output_pose_pitch_sign', legacy_output_pitch_sign)
+        )
+        self.output_cloud_sign_x = self._sign_from_value(
+            self._get_float_parameter('output_cloud_sign_x', 1.0)
+        )
+        self.output_cloud_sign_y = self._sign_from_value(
+            self._get_float_parameter('output_cloud_sign_y', 1.0)
+        )
+        self.output_cloud_sign_z = self._sign_from_value(
+            self._get_float_parameter('output_cloud_sign_z', 1.0)
+        )
+        self.output_pose_roll_offset_deg = self._get_float_parameter('output_pose_roll_offset_deg', 0.0)
+        self.output_pose_pitch_offset_deg = self._get_float_parameter('output_pose_pitch_offset_deg', 0.0)
+        self.output_pose_yaw_offset_deg = self._get_float_parameter('output_pose_yaw_offset_deg', 0.0)
+        self.output_cloud_roll_offset_deg = self._get_float_parameter('output_cloud_roll_offset_deg', 0.0)
+        self.output_cloud_pitch_offset_deg = self._get_float_parameter('output_cloud_pitch_offset_deg', 0.0)
+        self.output_cloud_yaw_offset_deg = self._get_float_parameter('output_cloud_yaw_offset_deg', 0.0)
+        self.output_pose_roll_offset_rad = math.radians(self.output_pose_roll_offset_deg)
+        self.output_pose_pitch_offset_rad = math.radians(self.output_pose_pitch_offset_deg)
+        self.output_pose_yaw_offset_rad = math.radians(self.output_pose_yaw_offset_deg)
+        self.output_cloud_roll_offset_rad = math.radians(self.output_cloud_roll_offset_deg)
+        self.output_cloud_pitch_offset_rad = math.radians(self.output_cloud_pitch_offset_deg)
+        self.output_cloud_yaw_offset_rad = math.radians(self.output_cloud_yaw_offset_deg)
         self.stepper_min_pitch_rad = math.radians(float(self.stepper_min_pitch_deg))
         self.stepper_max_pitch_rad = math.radians(float(self.stepper_max_pitch_deg))
         self.stepper_home_target_rel_pitch_rad = math.radians(float(self.stepper_home_pitch_deg))
@@ -241,6 +283,38 @@ class Lidar3DCloudNode(Node):
             f'Listening to {scan_topic}, {imu_a_topic}, {imu_b_topic}; '
             f'publishing {output_topic} and {pose_topic}'
         )
+        self.get_logger().info(
+            'Output frame signs: cloud_pitch=%+.0f pose_pitch=%+.0f cloud_xyz=[%+.0f,%+.0f,%+.0f]. '
+            'Legacy output_pitch_sign remains supported as a fallback default.'
+            % (
+                self.output_cloud_pitch_sign,
+                self.output_pose_pitch_sign,
+                self.output_cloud_sign_x,
+                self.output_cloud_sign_y,
+                self.output_cloud_sign_z,
+            )
+        )
+        self.get_logger().info(
+            'Output pose offsets (deg): roll=%.2f pitch=%.2f yaw=%.2f.'
+            % (
+                self.output_pose_roll_offset_deg,
+                self.output_pose_pitch_offset_deg,
+                self.output_pose_yaw_offset_deg,
+            )
+        )
+        self.get_logger().info(
+            'Cloud transform config: pitch_sign=%+.0f, axis_signs=[x=%+.0f, y=%+.0f, z=%+.0f], '
+            'offsets(deg)=[roll=%.2f, pitch=%.2f, yaw=%.2f].'
+            % (
+                self.output_cloud_pitch_sign,
+                self.output_cloud_sign_x,
+                self.output_cloud_sign_y,
+                self.output_cloud_sign_z,
+                self.output_cloud_roll_offset_deg,
+                self.output_cloud_pitch_offset_deg,
+                self.output_cloud_yaw_offset_deg,
+            )
+        )
 
     def _get_float_parameter(self, name, default_value):
         raw_value = self.get_parameter(name).value
@@ -251,6 +325,9 @@ class Lidar3DCloudNode(Node):
                 f'Parameter {name} value {raw_value!r} is not numeric; using default {default_value}.'
             )
             return float(default_value)
+
+    def _sign_from_value(self, value):
+        return 1.0 if float(value) >= 0.0 else -1.0
 
     def _force_stepper_stable(self):
         """Force a stable LOW state on the step/direction pins so the stepper does
@@ -732,15 +809,33 @@ class Lidar3DCloudNode(Node):
         )
         return rel_pitch
 
-    def build_cloud_from_scan(self, scan_msg):
-        rel_pitch = self.relative_pitch_rad()
+    def build_cloud_from_scan(self, scan_msg, rel_pitch=None):
+        if rel_pitch is None:
+            rel_pitch = self.relative_pitch_rad()
         if rel_pitch is None:
             return []
 
-        # For a nose-up platform, the scan needs to be rotated upward in the x-z plane.
-        tilt = -rel_pitch
-        c = math.cos(tilt)
-        s = math.sin(tilt)
+        # Apply the same orientation model used for pose: dynamic pitch from IMU plus static offsets.
+        roll = self.output_cloud_roll_offset_rad
+        pitch = (self.output_cloud_pitch_sign * rel_pitch) + self.output_cloud_pitch_offset_rad
+        yaw = self.output_cloud_yaw_offset_rad
+
+        cy = math.cos(yaw)
+        sy = math.sin(yaw)
+        cr = math.cos(roll)
+        sr = math.sin(roll)
+        cp = math.cos(pitch)
+        sp = math.sin(pitch)
+
+        r00 = cy * cp
+        r01 = cy * sp * sr - sy * cr
+        r02 = cy * sp * cr + sy * sr
+        r10 = sy * cp
+        r11 = sy * sp * sr + cy * cr
+        r12 = sy * sp * cr - cy * sr
+        r20 = -sp
+        r21 = cp * sr
+        r22 = cp * cr
 
         points = []
         for i, rng in enumerate(scan_msg.ranges):
@@ -754,14 +849,20 @@ class Lidar3DCloudNode(Node):
             y = rng * math.sin(angle)
             z = 0.0
 
-            x_rot = x * c + z * s
-            z_rot = -x * s + z * c
-            points.append((x_rot, y, z_rot))
+            x_rot = r00 * x + r01 * y + r02 * z
+            y_rot = r10 * x + r11 * y + r12 * z
+            z_rot = r20 * x + r21 * y + r22 * z
+            points.append((
+                self.output_cloud_sign_x * x_rot,
+                self.output_cloud_sign_y * y_rot,
+                self.output_cloud_sign_z * z_rot,
+            ))
 
         return points
 
-    def publish_pose(self, scan_msg):
-        rel_pitch = self.relative_pitch_rad()
+    def publish_pose(self, scan_msg, rel_pitch=None):
+        if rel_pitch is None:
+            rel_pitch = self.relative_pitch_rad()
         if rel_pitch is None:
             return
 
@@ -770,9 +871,9 @@ class Lidar3DCloudNode(Node):
         pose.header.frame_id = self.reference_frame
 
         # Laser frame is pitched relative to the base frame.
-        roll = 0.0
-        pitch = -rel_pitch
-        yaw = 0.0
+        roll = self.output_pose_roll_offset_rad
+        pitch = (self.output_pose_pitch_sign * rel_pitch) + self.output_pose_pitch_offset_rad
+        yaw = self.output_pose_yaw_offset_rad
 
         cy = math.cos(yaw * 0.5)
         sy = math.sin(yaw * 0.5)
@@ -818,7 +919,7 @@ class Lidar3DCloudNode(Node):
         else:
             self.get_logger().warn('Skipping point cloud publish because relative pitch is unavailable (IMUs not ready).')
 
-        points = self.build_cloud_from_scan(scan_msg)
+        points = self.build_cloud_from_scan(scan_msg, rel_pitch=rel_pitch)
         if not points:
             return
 
@@ -828,7 +929,7 @@ class Lidar3DCloudNode(Node):
 
         point_cloud = point_cloud2.create_cloud_xyz32(header, points)
         self.cloud_pub.publish(point_cloud)
-        self.publish_pose(scan_msg)
+        self.publish_pose(scan_msg, rel_pitch=rel_pitch)
 
     def __del__(self):
         try:
