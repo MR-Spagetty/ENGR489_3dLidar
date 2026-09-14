@@ -22,11 +22,20 @@ lidar_3d_pointcloud:
     stepper_step_delay_s: 0.001
     stepper_max_rate_hz: 500.0
     stepper_min_move_rad: 0.002
-    stepper_min_pitch_deg: -45.0  # lower scan limit in degrees, relative to the platform pitch zero
-    stepper_max_pitch_deg: 45.0   # upper scan limit in degrees, relative to the platform pitch zero
-    stepper_home_pitch_deg: 0.0   # default offset used when a measured zero is not available.
-    stepper_use_live_zero: true   # if true, average the live IMU relative pitch at startup and use it as the zero reference.
-                                # This is useful when the platform is only approximately level and can drift slightly.
+    stepper_min_pitch_deg: -45.0  # lower scan limit in degrees, relative to the measured mechanical home.
+    stepper_max_pitch_deg: 45.0   # upper scan limit in degrees, relative to the measured mechanical home.
+    stepper_scan_limit_tolerance_deg: 1.5  # reversal tolerance around limits; slightly wider band reduces endpoint chatter.
+    stepper_scan_step_deg: 2.0  # base sweep increment per control tick.
+    stepper_scan_ease_zone_deg: 12.0  # distance from endpoints where speed tapers for ease-in/ease-out.
+    stepper_scan_min_speed_scale: 0.35  # minimum speed fraction at the very edge of the ease zone.
+    stepper_scan_pi_kp: 0.7  # proportional gain for tracking the sweep target with relative pitch feedback.
+    stepper_scan_pi_ki: 0.03  # integral gain to remove steady-state tracking bias.
+    stepper_scan_pi_max_step_deg: 2.5  # max PI command magnitude per loop.
+    stepper_scan_pi_integral_limit_deg: 6.0  # anti-windup clamp for PI integral term.
+    stepper_scan_escape_step_deg: 3.0  # immediate inward target offset after endpoint reversal.
+    stepper_home_pitch_deg: 0.0   # target IMU-relative pitch at home (0 = lidar IMU level with robot-body IMU).
+    stepper_use_live_zero: true   # if true, wait for IMUs and actively home to stepper_home_pitch_deg.
+                  # if false, skip active homing and use stepper_home_pitch_deg as static center.
 
 dual_imu_publisher:
   ros__parameters:

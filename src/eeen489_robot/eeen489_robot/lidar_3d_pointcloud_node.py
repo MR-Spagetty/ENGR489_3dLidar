@@ -3,10 +3,12 @@
 import atexit
 import math
 import signal
+import threading
 import time
 
 import rclpy
 from rclpy.node import Node
+from rcl_interfaces.msg import ParameterDescriptor
 
 from sensor_msgs.msg import LaserScan, Imu, PointCloud2
 from geometry_msgs.msg import PoseStamped
@@ -45,6 +47,8 @@ class Lidar3DCloudNode(Node):
     def __init__(self):
         super().__init__('lidar_3d_pointcloud_node')
 
+        numeric_param_descriptor = ParameterDescriptor(dynamic_typing=True)
+
         self.declare_parameter('scan_topic', '/scan')
         self.declare_parameter('imu_a_topic', '/imu_a')
         self.declare_parameter('imu_b_topic', '/imu_b')
@@ -60,20 +64,29 @@ class Lidar3DCloudNode(Node):
         self.declare_parameter('stepper_dir_invert', False)
         self.declare_parameter('stepper_test_steps', 0)
         self.declare_parameter('stepper_steps_per_rev', 32)
-        self.declare_parameter('stepper_gear_ratio', 64.0)
+        self.declare_parameter('stepper_gear_ratio', 64.0, descriptor=numeric_param_descriptor)
         self.declare_parameter('stepper_microsteps', 1)
-        self.declare_parameter('stepper_step_delay_s', 0.0005)
-        self.declare_parameter('stepper_max_rate_hz', 500.0)
-        self.declare_parameter('stepper_min_move_rad', 0.002)
+        self.declare_parameter('stepper_step_delay_s', 0.0005, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_max_rate_hz', 500.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_min_move_rad', 0.002, descriptor=numeric_param_descriptor)
         self.declare_parameter('stepper_scan_enabled', True)
-        self.declare_parameter('stepper_scan_period_s', 6.0)
-        self.declare_parameter('stepper_min_pitch_deg', -45.0)
-        self.declare_parameter('stepper_max_pitch_deg', 45.0)
-        self.declare_parameter('stepper_home_pitch_deg', 0.0)
+        self.declare_parameter('stepper_scan_period_s', 6.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_min_pitch_deg', -45.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_max_pitch_deg', 45.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_home_pitch_deg', 0.0, descriptor=numeric_param_descriptor)
         self.declare_parameter('stepper_use_live_zero', True)
-        self.declare_parameter('stepper_home_kp', 1.2)
-        self.declare_parameter('stepper_home_ki', 0.15)
-        self.declare_parameter('stepper_home_max_step_deg', 2.0)
+        self.declare_parameter('stepper_home_kp', 1.2, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_home_ki', 0.15, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_home_max_step_deg', 2.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_scan_limit_tolerance_deg', 1.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_scan_step_deg', 0.75, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_scan_ease_zone_deg', 12.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_scan_min_speed_scale', 0.25, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_scan_pi_kp', 0.9, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_scan_pi_ki', 0.08, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_scan_pi_max_step_deg', 1.5, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_scan_pi_integral_limit_deg', 10.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_scan_escape_step_deg', 2.0, descriptor=numeric_param_descriptor)
 
         scan_topic = self.get_parameter('scan_topic').value
         imu_a_topic = self.get_parameter('imu_a_topic').value
@@ -90,27 +103,69 @@ class Lidar3DCloudNode(Node):
         self.stepper_dir_invert = self.get_parameter('stepper_dir_invert').value
         self.stepper_test_steps = self.get_parameter('stepper_test_steps').value
         self.stepper_steps_per_rev = self.get_parameter('stepper_steps_per_rev').value
-        self.stepper_gear_ratio = float(self.get_parameter('stepper_gear_ratio').value)
+        self.stepper_gear_ratio = self._get_float_parameter('stepper_gear_ratio', 64.0)
         if self.stepper_gear_ratio <= 0.0:
             self.get_logger().warn('stepper_gear_ratio must be > 0; forcing to 1.0.')
             self.stepper_gear_ratio = 1.0
         self.stepper_microsteps = self.get_parameter('stepper_microsteps').value
-        self.stepper_step_delay_s = self.get_parameter('stepper_step_delay_s').value
-        self.stepper_max_rate_hz = self.get_parameter('stepper_max_rate_hz').value
-        self.stepper_min_move_rad = self.get_parameter('stepper_min_move_rad').value
+        self.stepper_step_delay_s = self._get_float_parameter('stepper_step_delay_s', 0.0005)
+        self.stepper_max_rate_hz = self._get_float_parameter('stepper_max_rate_hz', 500.0)
+        self.stepper_min_move_rad = self._get_float_parameter('stepper_min_move_rad', 0.002)
         self.stepper_scan_enabled = self.get_parameter('stepper_scan_enabled').value
-        self.stepper_scan_period_s = self.get_parameter('stepper_scan_period_s').value
-        self.stepper_min_pitch_deg = self.get_parameter('stepper_min_pitch_deg').value
-        self.stepper_max_pitch_deg = self.get_parameter('stepper_max_pitch_deg').value
-        self.stepper_home_pitch_deg = self.get_parameter('stepper_home_pitch_deg').value
+        self.stepper_scan_period_s = self._get_float_parameter('stepper_scan_period_s', 6.0)
+        self.stepper_min_pitch_deg = self._get_float_parameter('stepper_min_pitch_deg', -45.0)
+        self.stepper_max_pitch_deg = self._get_float_parameter('stepper_max_pitch_deg', 45.0)
+        self.stepper_home_pitch_deg = self._get_float_parameter('stepper_home_pitch_deg', 0.0)
         self.stepper_use_live_zero = self.get_parameter('stepper_use_live_zero').value
-        self.stepper_home_kp = float(self.get_parameter('stepper_home_kp').value)
-        self.stepper_home_ki = float(self.get_parameter('stepper_home_ki').value)
-        self.stepper_home_max_step_deg = float(self.get_parameter('stepper_home_max_step_deg').value)
+        self.stepper_home_kp = self._get_float_parameter('stepper_home_kp', 1.2)
+        self.stepper_home_ki = self._get_float_parameter('stepper_home_ki', 0.15)
+        self.stepper_home_max_step_deg = self._get_float_parameter('stepper_home_max_step_deg', 2.0)
+        self.stepper_scan_limit_tolerance_deg = self._get_float_parameter(
+            'stepper_scan_limit_tolerance_deg', 1.0
+        )
+        self.stepper_scan_step_deg = self._get_float_parameter('stepper_scan_step_deg', 0.75)
+        self.stepper_scan_ease_zone_deg = self._get_float_parameter('stepper_scan_ease_zone_deg', 12.0)
+        self.stepper_scan_min_speed_scale = self._get_float_parameter(
+            'stepper_scan_min_speed_scale', 0.25
+        )
+        self.stepper_scan_pi_kp = self._get_float_parameter('stepper_scan_pi_kp', 0.9)
+        self.stepper_scan_pi_ki = self._get_float_parameter('stepper_scan_pi_ki', 0.08)
+        self.stepper_scan_pi_max_step_deg = self._get_float_parameter(
+            'stepper_scan_pi_max_step_deg', 1.5
+        )
+        self.stepper_scan_pi_integral_limit_deg = self._get_float_parameter(
+            'stepper_scan_pi_integral_limit_deg', 10.0
+        )
+        self.stepper_scan_escape_step_deg = self._get_float_parameter(
+            'stepper_scan_escape_step_deg', 2.0
+        )
         self.stepper_min_pitch_rad = math.radians(float(self.stepper_min_pitch_deg))
         self.stepper_max_pitch_rad = math.radians(float(self.stepper_max_pitch_deg))
-        self.stepper_home_pitch_rad = math.radians(float(self.stepper_home_pitch_deg))
+        self.stepper_home_target_rel_pitch_rad = math.radians(float(self.stepper_home_pitch_deg))
+        self.stepper_home_pitch_rad = self.stepper_home_target_rel_pitch_rad
         self.stepper_home_max_step_rad = math.radians(self.stepper_home_max_step_deg)
+        self.stepper_scan_limit_tolerance_rad = math.radians(self.stepper_scan_limit_tolerance_deg)
+        if self.stepper_scan_step_deg <= 0.0:
+            self.get_logger().warn('stepper_scan_step_deg must be > 0; forcing to 0.75 deg.')
+            self.stepper_scan_step_deg = 0.75
+        self.stepper_scan_step_rad = math.radians(self.stepper_scan_step_deg)
+        if self.stepper_scan_ease_zone_deg < 0.0:
+            self.get_logger().warn('stepper_scan_ease_zone_deg must be >= 0; forcing to 0.0 deg.')
+            self.stepper_scan_ease_zone_deg = 0.0
+        self.stepper_scan_ease_zone_rad = math.radians(self.stepper_scan_ease_zone_deg)
+        self.stepper_scan_min_speed_scale = max(0.05, min(1.0, self.stepper_scan_min_speed_scale))
+        if self.stepper_scan_pi_max_step_deg <= 0.0:
+            self.get_logger().warn('stepper_scan_pi_max_step_deg must be > 0; forcing to 1.5 deg.')
+            self.stepper_scan_pi_max_step_deg = 1.5
+        self.stepper_scan_pi_max_step_rad = math.radians(self.stepper_scan_pi_max_step_deg)
+        if self.stepper_scan_pi_integral_limit_deg <= 0.0:
+            self.get_logger().warn('stepper_scan_pi_integral_limit_deg must be > 0; forcing to 10.0 deg.')
+            self.stepper_scan_pi_integral_limit_deg = 10.0
+        self.stepper_scan_pi_integral_limit_rad = math.radians(self.stepper_scan_pi_integral_limit_deg)
+        if self.stepper_scan_escape_step_deg <= 0.0:
+            self.get_logger().warn('stepper_scan_escape_step_deg must be > 0; forcing to 2.0 deg.')
+            self.stepper_scan_escape_step_deg = 2.0
+        self.stepper_scan_escape_step_rad = math.radians(self.stepper_scan_escape_step_deg)
         self.stepper_scan_start_time = time.monotonic()
 
         self.stepper_steps_per_rad = (
@@ -152,7 +207,12 @@ class Lidar3DCloudNode(Node):
         self.stepper_target_pitch = self.stepper_home_pitch_rad
         self.stepper_current_pitch = self.stepper_home_pitch_rad
         self.stepper_homed = False
+        self.stepper_pending_home = False
+        self.stepper_homing_in_progress = False
+        self.stepper_homing_lock = threading.Lock()
         self.stepper_scan_direction = 1.0
+        self.stepper_scan_target_rel = self.stepper_home_target_rel_pitch_rad
+        self.stepper_scan_error_integral = 0.0
         self.use_gpiozero = False  # Will be set to True if gpiozero succeeds
         self.stepper_step = None  # Will be set by _setup_stepper if using gpiozero
         self.stepper_dir = None   # Will be set by _setup_stepper if using gpiozero
@@ -162,7 +222,18 @@ class Lidar3DCloudNode(Node):
             self._setup_stepper()
             if self.stepper_enabled and int(self.stepper_test_steps) > 0:
                 self._run_stepper_self_test(int(self.stepper_test_steps))
-            self._home_stepper_to_zero()
+            if self.stepper_use_live_zero:
+                self.stepper_pending_home = True
+                self.get_logger().info('Waiting for IMU data before starting stepper homing.')
+                self._maybe_home_stepper()
+            else:
+                self.stepper_homed = True
+                self.stepper_scan_target_rel = self.stepper_home_target_rel_pitch_rad
+                self.stepper_scan_error_integral = 0.0
+                self.get_logger().info(
+                    'Live zero disabled. Using configured home pitch %.3f deg as the scan center.'
+                    % math.degrees(self.stepper_home_pitch_rad)
+                )
             if self.stepper_scan_enabled:
                 self.create_timer(max(0.02, self.stepper_scan_period_s / 200.0), self._stepper_scan_loop)
 
@@ -170,6 +241,16 @@ class Lidar3DCloudNode(Node):
             f'Listening to {scan_topic}, {imu_a_topic}, {imu_b_topic}; '
             f'publishing {output_topic} and {pose_topic}'
         )
+
+    def _get_float_parameter(self, name, default_value):
+        raw_value = self.get_parameter(name).value
+        try:
+            return float(raw_value)
+        except (TypeError, ValueError):
+            self.get_logger().warn(
+                f'Parameter {name} value {raw_value!r} is not numeric; using default {default_value}.'
+            )
+            return float(default_value)
 
     def _force_stepper_stable(self):
         """Force a stable LOW state on the step/direction pins so the stepper does
@@ -299,16 +380,15 @@ class Lidar3DCloudNode(Node):
 
         if self.imu_a is None or self.imu_b is None:
             self.get_logger().warn('Cannot home stepper because IMU A or B is not available.')
+            self.stepper_pending_home = True
             return
 
-        self.stepper_home_pitch_rad = 0.0
-        self.stepper_home_pitch_deg = 0.0
-        self.stepper_current_pitch = 0.0
-        self.stepper_target_pitch = 0.0
+        target_rel_pitch = self.stepper_home_target_rel_pitch_rad
         integral = 0.0
 
         self.get_logger().info(
-            'Leveling the platform to zero relative pitch using the robot-body IMU as the reference.'
+            'Leveling the platform to %.3f deg relative pitch using the robot-body IMU as the reference.'
+            % math.degrees(target_rel_pitch)
         )
 
         for attempt in range(80):
@@ -317,7 +397,7 @@ class Lidar3DCloudNode(Node):
                 time.sleep(0.02)
                 continue
 
-            error = -rel_pitch
+            error = target_rel_pitch - rel_pitch
             integral += error
             integral = max(-0.25, min(0.25, integral))
             correction = (self.stepper_home_kp * error) + (self.stepper_home_ki * integral)
@@ -343,16 +423,58 @@ class Lidar3DCloudNode(Node):
             time.sleep(0.03)
 
         final_rel = self.relative_pitch_rad()
-        if final_rel is not None:
-            self.stepper_home_pitch_rad = final_rel
-            self.stepper_home_pitch_deg = math.degrees(final_rel)
+        if final_rel is None:
+            self.get_logger().warn('Homing failed: could not read final relative pitch from IMUs.')
+            self.stepper_pending_home = True
+            self.stepper_homed = False
+            return
+
+        self.stepper_home_pitch_rad = self.stepper_current_pitch
+        self.stepper_home_pitch_deg = math.degrees(self.stepper_home_pitch_rad)
+        self.stepper_target_pitch = self.stepper_home_pitch_rad
+        self.stepper_scan_target_rel = self.stepper_home_target_rel_pitch_rad
+        self.stepper_scan_error_integral = 0.0
 
         self.get_logger().info(
-            'Homing complete. Zero point relative to robot-body IMU is %.3f deg; '
-            'scan limits are %.2f deg to %.2f deg.'
-            % (self.stepper_home_pitch_deg, self.stepper_min_pitch_deg, self.stepper_max_pitch_deg)
+            'Homing complete. Achieved relative pitch is %.3f deg (target %.3f deg); '
+            'mechanical home is %.3f deg; scan limits are %.2f deg to %.2f deg relative to home.'
+            % (
+                math.degrees(final_rel),
+                math.degrees(target_rel_pitch),
+                self.stepper_home_pitch_deg,
+                self.stepper_min_pitch_deg,
+                self.stepper_max_pitch_deg,
+            )
         )
+        self.stepper_pending_home = False
         self.stepper_homed = True
+
+    def _maybe_home_stepper(self):
+        if not self.stepper_enabled:
+            return
+        if self.stepper_homed:
+            return
+        if not self.stepper_use_live_zero:
+            return
+        if not self.stepper_pending_home:
+            return
+        if self.imu_a is None or self.imu_b is None:
+            return
+
+        with self.stepper_homing_lock:
+            if self.stepper_homing_in_progress:
+                return
+            self.stepper_homing_in_progress = True
+
+        self.get_logger().info('IMUs are ready; starting deferred stepper homing worker.')
+        threading.Thread(target=self._home_stepper_worker, daemon=True).start()
+
+    def _home_stepper_worker(self):
+        try:
+            self._home_stepper_to_zero()
+        finally:
+            with self.stepper_homing_lock:
+                self.stepper_homing_in_progress = False
 
     def _safe_stepper_shutdown(self):
         self.get_logger().info('Putting stepper in a safe shutdown state with stable LOW pins.')
@@ -416,27 +538,137 @@ class Lidar3DCloudNode(Node):
         )
 
     def _stepper_scan_loop(self):
-        if not self.stepper_enabled or not self.stepper_scan_enabled:
+        if (
+            not self.stepper_enabled
+            or not self.stepper_scan_enabled
+            or not self.stepper_homed
+            or self.stepper_homing_in_progress
+        ):
             return
 
         lower_bound = self.stepper_home_pitch_rad + self.stepper_min_pitch_rad
         upper_bound = self.stepper_home_pitch_rad + self.stepper_max_pitch_rad
-        max_scan_step = math.radians(1.5)
+        lower_rel_bound = self.stepper_home_target_rel_pitch_rad + self.stepper_min_pitch_rad
+        upper_rel_bound = self.stepper_home_target_rel_pitch_rad + self.stepper_max_pitch_rad
+        max_scan_step = self.stepper_scan_step_rad
+        limit_tol = max(self.stepper_min_move_rad, self.stepper_scan_limit_tolerance_rad)
+        rel_pitch = self.relative_pitch_rad()
 
-        if self.stepper_scan_direction > 0.0:
-            target = min(self.stepper_current_pitch + max_scan_step, upper_bound)
-            if self.stepper_current_pitch >= upper_bound - self.stepper_min_move_rad:
-                self.stepper_scan_direction = -1.0
-                target = upper_bound
+        # Relative pitch estimate derived from step counts, used as fallback when IMU data is stale.
+        stepper_rel_pitch = (
+            self.stepper_home_target_rel_pitch_rad
+            + (self.stepper_current_pitch - self.stepper_home_pitch_rad)
+        )
+        rel_feedback = rel_pitch if rel_pitch is not None else stepper_rel_pitch
+        rel_control_anchor = max(lower_rel_bound, min(upper_rel_bound, rel_feedback))
+
+        at_upper_limit = rel_control_anchor >= upper_rel_bound - limit_tol
+        at_lower_limit = rel_control_anchor <= lower_rel_bound + limit_tol
+
+        if self.stepper_scan_direction > 0.0 and at_upper_limit:
+            self.stepper_scan_direction = -1.0
+            self.stepper_scan_error_integral *= 0.5
+            self.stepper_scan_target_rel = max(
+                lower_rel_bound,
+                upper_rel_bound - self.stepper_scan_escape_step_rad,
+            )
+        elif self.stepper_scan_direction < 0.0 and at_lower_limit:
+            self.stepper_scan_direction = 1.0
+            self.stepper_scan_error_integral *= 0.5
+            self.stepper_scan_target_rel = min(
+                upper_rel_bound,
+                lower_rel_bound + self.stepper_scan_escape_step_rad,
+            )
+
+        # Ease sweep speed near bounds using a smoothstep profile on distance to edge.
+        dist_to_edge = min(
+            rel_control_anchor - lower_rel_bound,
+            upper_rel_bound - rel_control_anchor,
+        )
+        if self.stepper_scan_ease_zone_rad > 0.0:
+            ease_ratio = max(0.0, min(1.0, dist_to_edge / self.stepper_scan_ease_zone_rad))
         else:
-            target = max(self.stepper_current_pitch - max_scan_step, lower_bound)
-            if self.stepper_current_pitch <= lower_bound + self.stepper_min_move_rad:
-                self.stepper_scan_direction = 1.0
-                target = lower_bound
+            ease_ratio = 1.0
+        smooth = ease_ratio * ease_ratio * (3.0 - 2.0 * ease_ratio)
+        speed_scale = self.stepper_scan_min_speed_scale + (1.0 - self.stepper_scan_min_speed_scale) * smooth
+
+        # Advance a persistent sweep target each tick, then track it with PI control.
+        sweep_step = max_scan_step * speed_scale
+        target_rel = self.stepper_scan_target_rel + (self.stepper_scan_direction * sweep_step)
+
+        if self.stepper_scan_direction > 0.0 and target_rel >= upper_rel_bound:
+            target_rel = upper_rel_bound
+            self.stepper_scan_direction = -1.0
+        elif self.stepper_scan_direction < 0.0 and target_rel <= lower_rel_bound:
+            target_rel = lower_rel_bound
+            self.stepper_scan_direction = 1.0
+
+        target_rel = max(lower_rel_bound, min(upper_rel_bound, target_rel))
+        self.stepper_scan_target_rel = target_rel
+
+        # PI control from bounded state avoids endpoint lock when IMU reports out-of-range values.
+        scan_error = self.stepper_scan_target_rel - rel_control_anchor
+        self.stepper_scan_error_integral += scan_error
+        self.stepper_scan_error_integral = max(
+            -self.stepper_scan_pi_integral_limit_rad,
+            min(self.stepper_scan_pi_integral_limit_rad, self.stepper_scan_error_integral),
+        )
+        control_rel_step = (
+            self.stepper_scan_pi_kp * scan_error
+            + self.stepper_scan_pi_ki * self.stepper_scan_error_integral
+        )
+        control_step_limit = self.stepper_scan_pi_max_step_rad
+        control_rel_step = max(
+            -control_step_limit,
+            min(control_step_limit, control_rel_step),
+        )
+
+        commanded_rel = rel_control_anchor + control_rel_step
+        commanded_rel = max(lower_rel_bound, min(upper_rel_bound, commanded_rel))
+        if rel_pitch is not None:
+            # Drive target from measured relative-pitch error so IMU/stepper bias cannot collapse motion.
+            target = self.stepper_current_pitch + (commanded_rel - rel_feedback)
+        else:
+            target = self.stepper_home_pitch_rad + (commanded_rel - self.stepper_home_target_rel_pitch_rad)
+        target = max(lower_bound, min(upper_bound, target))
+
+        # Enforce monotonic inward progress in relative-pitch space to avoid flip/inversion behavior.
+        min_rel_delta = max(self.stepper_min_move_rad * 1.5, math.radians(0.15))
+        rel_delta = commanded_rel - rel_control_anchor
+        if (rel_delta * self.stepper_scan_direction) <= 0.0 or abs(rel_delta) < min_rel_delta:
+            forced_rel_delta = min_rel_delta if self.stepper_scan_direction > 0.0 else -min_rel_delta
+            commanded_rel = rel_control_anchor + forced_rel_delta
+            commanded_rel = max(lower_rel_bound, min(upper_rel_bound, commanded_rel))
+            if rel_pitch is not None:
+                target = self.stepper_current_pitch + (commanded_rel - rel_feedback)
+            else:
+                target = self.stepper_home_pitch_rad + (commanded_rel - self.stepper_home_target_rel_pitch_rad)
+            target = max(lower_bound, min(upper_bound, target))
+
+        # Absolute-domain enforcement: if command collapses inside deadband, force one inward step.
+        min_abs_delta = max(self.stepper_min_move_rad * 1.5, math.radians(0.15))
+        target_delta = target - self.stepper_current_pitch
+        if (target_delta * self.stepper_scan_direction) <= 0.0 or abs(target_delta) < min_abs_delta:
+            forced_abs_delta = min_abs_delta if self.stepper_scan_direction > 0.0 else -min_abs_delta
+            target = self.stepper_current_pitch + forced_abs_delta
+            target = max(lower_bound, min(upper_bound, target))
+            target_delta = target - self.stepper_current_pitch
 
         self.get_logger().info(
             f'Stepper scan: direction={self.stepper_scan_direction:+.0f}, '
             f'current={math.degrees(self.stepper_current_pitch):.2f} deg, '
+            f'rel_pitch={math.degrees(rel_pitch) if rel_pitch is not None else float("nan"):.2f} deg, '
+            f'rel_feedback={math.degrees(rel_feedback):.2f} deg, '
+            f'rel_anchor={math.degrees(rel_control_anchor):.2f} deg, '
+            f'stepper_rel={math.degrees(stepper_rel_pitch):.2f} deg, '
+            f'sweep_target_rel={math.degrees(self.stepper_scan_target_rel):.2f} deg, '
+            f'commanded_rel={math.degrees(commanded_rel):.2f} deg, '
+            f'scan_error={math.degrees(scan_error):.2f} deg, '
+            f'speed_scale={speed_scale:.2f}, '
+            f'pi_step={math.degrees(control_rel_step):.2f} deg, '
+            f'min_rel_delta={math.degrees(min_rel_delta):.2f} deg, '
+            f'target_delta={math.degrees(target_delta):.2f} deg, '
+            f'limit_tol={math.degrees(limit_tol):.2f} deg, '
             f'lower={math.degrees(lower_bound):.2f} deg, '
             f'upper={math.degrees(upper_bound):.2f} deg, '
             f'command={math.degrees(target):.2f} deg.'
@@ -445,14 +677,18 @@ class Lidar3DCloudNode(Node):
 
     def imu_a_callback(self, msg):
         self.imu_a = msg
+        self._maybe_home_stepper()
 
     def imu_b_callback(self, msg):
         self.imu_b = msg
+        self._maybe_home_stepper()
 
     def scan_callback(self, msg):
         if self.imu_a is None or self.imu_b is None:
             self.get_logger().debug('Waiting for both IMU readings before generating point cloud.')
             return
+
+        self._maybe_home_stepper()
 
         # Always update latest scan - process all available scan data
         self.latest_scan = msg
@@ -561,6 +797,7 @@ class Lidar3DCloudNode(Node):
         if self.stepper_scan_enabled:
             self.get_logger().info(
                 f'Continuous scan active: stepper pitch={math.degrees(self.stepper_current_pitch):.2f} deg; '
+                f'relative pitch={math.degrees(rel_pitch) if rel_pitch is not None else float("nan"):.2f} deg; '
                 f'relative limits=[{self.stepper_min_pitch_deg:.2f}, {self.stepper_max_pitch_deg:.2f}] deg; '
                 f'home offset={math.degrees(self.stepper_home_pitch_rad):.2f} deg.'
             )
