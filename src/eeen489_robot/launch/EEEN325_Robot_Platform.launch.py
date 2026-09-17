@@ -96,11 +96,9 @@ def generate_launch_description():
 		parameters=[xbox_config]
 	)
 	# Set the transforms
-	# TODO: Requires tf2_ros package - uncomment when available
 	eeen325_transforms = IncludeLaunchDescription(
 		PythonLaunchDescriptionSource([PathJoinSubstitution([FindPackageShare('eeen489_robot'),'launch','EEEN325_Robot_static_transform.launch.py'])])
 		)
-	# eeen325_transforms = None  # Disabled for now
 	# to use a different directory for the joystick launch file edit config_filepath
 	xbox_series_twist = GroupAction(
 		actions=[

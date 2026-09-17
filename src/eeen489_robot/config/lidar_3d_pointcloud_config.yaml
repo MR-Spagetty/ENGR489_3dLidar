@@ -30,6 +30,15 @@ lidar_3d_pointcloud:
     stepper_scan_min_speed_scale: 0.35  # minimum speed fraction at the very edge of the ease zone.
     stepper_scan_pi_kp: 0.7  # proportional gain for tracking the sweep target with relative pitch feedback.
     stepper_scan_pi_ki: 0.03  # integral gain to remove steady-state tracking bias.
+    stepper_scan_drift_k: 0.025  # lower gain to avoid drift over-correction while scanning in motion.
+    stepper_scan_drift_max_step_deg: 0.04  # cap bias change per control tick to prevent runaway bias.
+    stepper_scan_endpoint_correction_enabled: true
+    stepper_scan_endpoint_tolerance_deg: 0.8  # if measured pitch misses an end by more than this, hold and correct before reversing.
+    stepper_scan_endpoint_window_deg: 3.0  # engage endpoint correction only near the ends of travel.
+    stepper_scan_endpoint_max_step_deg: 0.8  # cap each endpoint correction nudge to avoid abrupt kicks.
+    stepper_scan_endpoint_recover_enabled: true
+    stepper_scan_endpoint_recover_window_deg: 0.6  # if the model says it is already at the end but IMU says it is still short, trigger recovery.
+    stepper_scan_endpoint_recover_step_deg: 0.5  # temporary internal re-anchor size used to force a few extra steps into the endpoint.
     stepper_scan_pi_max_step_deg: 2.5  # max PI command magnitude per loop.
     stepper_scan_pi_integral_limit_deg: 6.0  # anti-windup clamp for PI integral term.
     stepper_scan_escape_step_deg: 3.0  # immediate inward target offset after endpoint reversal.
