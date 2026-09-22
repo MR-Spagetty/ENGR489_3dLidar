@@ -51,6 +51,9 @@ lidar_3d_pointcloud:
     output_cloud_roll_offset_deg: 0.0  # additive roll offset for cloud transform.
     output_cloud_pitch_offset_deg: 0.0  # additive pitch offset for cloud transform.
     output_cloud_yaw_offset_deg: 180.0  # additive yaw offset for cloud transform.
+    output_mount_offset_x_m: 0.0  # lidar-to-pivot translation in meters, X axis in the sensor/pivot frame.
+    output_mount_offset_y_m: 0.0  # lidar-to-pivot translation in meters, Y axis in the sensor/pivot frame.
+    output_mount_offset_z_m: 0.0485  # lidar is 48.5 mm above the pitch pivot point.
     output_cloud_sign_x: -1.0  # +1/-1 for cloud X axis (forward/backward inversion).
     output_cloud_sign_y: -1.0  # +1/-1 for cloud Y axis (left/right inversion).
     output_cloud_sign_z: 1.0  # +1/-1 for cloud Z axis (up/down inversion).

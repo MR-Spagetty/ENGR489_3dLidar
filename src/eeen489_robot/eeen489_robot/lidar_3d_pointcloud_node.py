@@ -114,6 +114,9 @@ class Lidar3DCloudNode(Node):
         self.declare_parameter('output_cloud_roll_offset_deg', 0.0, descriptor=numeric_param_descriptor)
         self.declare_parameter('output_cloud_pitch_offset_deg', 0.0, descriptor=numeric_param_descriptor)
         self.declare_parameter('output_cloud_yaw_offset_deg', 0.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_mount_offset_x_m', 0.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_mount_offset_y_m', 0.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_mount_offset_z_m', 0.0, descriptor=numeric_param_descriptor)
 
         scan_topic = self.get_parameter('scan_topic').value
         imu_a_topic = self.get_parameter('imu_a_topic').value
@@ -229,6 +232,9 @@ class Lidar3DCloudNode(Node):
         self.output_cloud_roll_offset_deg = self._get_float_parameter('output_cloud_roll_offset_deg', 0.0)
         self.output_cloud_pitch_offset_deg = self._get_float_parameter('output_cloud_pitch_offset_deg', 0.0)
         self.output_cloud_yaw_offset_deg = self._get_float_parameter('output_cloud_yaw_offset_deg', 0.0)
+        self.output_mount_offset_x_m = self._get_float_parameter('output_mount_offset_x_m', 0.0)
+        self.output_mount_offset_y_m = self._get_float_parameter('output_mount_offset_y_m', 0.0)
+        self.output_mount_offset_z_m = self._get_float_parameter('output_mount_offset_z_m', 0.0)
         self.output_pose_roll_offset_rad = math.radians(self.output_pose_roll_offset_deg)
         self.output_pose_pitch_offset_rad = math.radians(self.output_pose_pitch_offset_deg)
         self.output_pose_yaw_offset_rad = math.radians(self.output_pose_yaw_offset_deg)
@@ -406,7 +412,7 @@ class Lidar3DCloudNode(Node):
         )
         self.get_logger().info(
             'Cloud transform config: pitch_sign=%+.0f, axis_signs=[x=%+.0f, y=%+.0f, z=%+.0f], '
-            'offsets(deg)=[roll=%.2f, pitch=%.2f, yaw=%.2f].'
+            'offsets(deg)=[roll=%.2f, pitch=%.2f, yaw=%.2f], mount_offset_m=[x=%.3f, y=%.3f, z=%.3f].'
             % (
                 self.output_cloud_pitch_sign,
                 self.output_cloud_sign_x,
@@ -415,6 +421,9 @@ class Lidar3DCloudNode(Node):
                 self.output_cloud_roll_offset_deg,
                 self.output_cloud_pitch_offset_deg,
                 self.output_cloud_yaw_offset_deg,
+                self.output_mount_offset_x_m,
+                self.output_mount_offset_y_m,
+                self.output_mount_offset_z_m,
             )
         )
 
@@ -793,6 +802,7 @@ class Lidar3DCloudNode(Node):
         endpoint_step = 0.0
         endpoint_recovery_active = False
         endpoint_recovery_step = 0.0
+        recovery_target = None
 
         if self.stepper_scan_endpoint_recover_enabled:
             lower_stall = (
@@ -808,24 +818,19 @@ class Lidar3DCloudNode(Node):
             if lower_stall:
                 endpoint_recovery_active = True
                 endpoint_recovery_step = self.stepper_scan_endpoint_recover_step_rad
-                self.stepper_current_pitch += endpoint_recovery_step
-                stepper_rel_pitch = (
-                    self.stepper_home_target_rel_pitch_rad
-                    + (self.stepper_current_pitch - self.stepper_home_pitch_rad)
-                )
-                commanded_rel = lower_rel_bound
+                recovery_target = self.stepper_current_pitch - endpoint_recovery_step
             elif upper_stall:
                 endpoint_recovery_active = True
                 endpoint_recovery_step = self.stepper_scan_endpoint_recover_step_rad
-                self.stepper_current_pitch -= endpoint_recovery_step
-                stepper_rel_pitch = (
-                    self.stepper_home_target_rel_pitch_rad
-                    + (self.stepper_current_pitch - self.stepper_home_pitch_rad)
-                )
-                commanded_rel = upper_rel_bound
+                recovery_target = self.stepper_current_pitch + endpoint_recovery_step
 
-        target = self.stepper_home_pitch_rad + (commanded_rel - self.stepper_home_target_rel_pitch_rad)
-        target = max(lower_bound, min(upper_bound, target))
+        if recovery_target is not None:
+            target = recovery_target
+            recovery_margin = self.stepper_scan_endpoint_recover_step_rad
+            target = max(lower_bound - recovery_margin, min(upper_bound + recovery_margin, target))
+        else:
+            target = self.stepper_home_pitch_rad + (commanded_rel - self.stepper_home_target_rel_pitch_rad)
+            target = max(lower_bound, min(upper_bound, target))
         target_delta = target - self.stepper_current_pitch
 
         # Keep scan-point interpolation state fresh for per-point pitch estimation.
@@ -1023,6 +1028,12 @@ class Lidar3DCloudNode(Node):
                 cp * cr,
             )
 
+        mount_offset = (
+            self.output_mount_offset_x_m,
+            self.output_mount_offset_y_m,
+            self.output_mount_offset_z_m,
+        )
+
         if rel_pitch_start is None:
             rel_pitch_start = rel_pitch
         if rel_pitch_end is None:
@@ -1050,6 +1061,10 @@ class Lidar3DCloudNode(Node):
             x = rng * math.cos(angle)
             y = rng * math.sin(angle)
             z = 0.0
+
+            x += mount_offset[0]
+            y += mount_offset[1]
+            z += mount_offset[2]
 
             x_rot = r00 * x + r01 * y + r02 * z
             y_rot = r10 * x + r11 * y + r12 * z
@@ -1089,9 +1104,30 @@ class Lidar3DCloudNode(Node):
         pose.pose.orientation.y = cy * cr * sp + sy * sr * cp
         pose.pose.orientation.z = sy * cr * cp - cy * sr * sp
 
-        pose.pose.position.x = 0.0
-        pose.pose.position.y = 0.0
-        pose.pose.position.z = 0.0
+        mount_offset_x = self.output_mount_offset_x_m
+        mount_offset_y = self.output_mount_offset_y_m
+        mount_offset_z = self.output_mount_offset_z_m
+
+        cy = math.cos(yaw)
+        sy = math.sin(yaw)
+        cr = math.cos(roll)
+        sr = math.sin(roll)
+        cp = math.cos(pitch)
+        sp = math.sin(pitch)
+
+        r00 = cy * cp
+        r01 = cy * sp * sr - sy * cr
+        r02 = cy * sp * cr + sy * sr
+        r10 = sy * cp
+        r11 = sy * sp * sr + cy * cr
+        r12 = sy * sp * cr - cy * sr
+        r20 = -sp
+        r21 = cp * sr
+        r22 = cp * cr
+
+        pose.pose.position.x = r00 * mount_offset_x + r01 * mount_offset_y + r02 * mount_offset_z
+        pose.pose.position.y = r10 * mount_offset_x + r11 * mount_offset_y + r12 * mount_offset_z
+        pose.pose.position.z = r20 * mount_offset_x + r21 * mount_offset_y + r22 * mount_offset_z
 
         self.pose_pub.publish(pose)
 
