@@ -20,7 +20,7 @@ footprint_transform = Node(
 lidar_transform = Node(
             package='tf2_ros',
             executable='static_transform_publisher',
-            arguments = ['--x', str(-3.5/100.0), '--y', '0', '--z', '0', '--qx', '0', '--qy', '0', '--qz', '0', '--qw', '1', '--frame-id', 'base_link', '--child-frame-id', 'laser'],
+            arguments = ['--x', str(-3.5/100.0), '--y', '0', '--z', str(30.8/100.0), '--qx', '0', '--qy', '0', '--qz', '0', '--qw', '1', '--frame-id', 'base_link', '--child-frame-id', 'laser'],
         )
 quanrot = rad2Quan(22.5) # (45/2)+45*5 degrees
 Ultraa_transform = Node( # 1 "0x20"

@@ -5,18 +5,32 @@
 set -e
 
 WORKSPACE="${1:-.}"
+if [ $# -gt 0 ]; then
+  shift
+fi
 cd "$WORKSPACE"
 
 echo "🔨 Building ENGR489_3dLidar platform..."
 echo "   Workspace: $WORKSPACE"
+
+REQUIRED_PACKAGES=(
+  eeen489_robot
+  sllidar_ros2
+  joy
+  teleop_twist_joy
+  twist_mux
+)
+
+echo "   Packages: ${REQUIRED_PACKAGES[*]}"
 
 # Run colcon build
 source ~/ros2_env/bin/activate
 source ~/ros2_jazzy/install/setup.bash
 
 colcon build \
+  --packages-up-to "${REQUIRED_PACKAGES[@]}" \
   --parallel-workers 4 \
-  --cmake-args -DCMAKE_BUILD_TYPE=Release \
+  --cmake-args -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
   "$@"
 
 echo ""

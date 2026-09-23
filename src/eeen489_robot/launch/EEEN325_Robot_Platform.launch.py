@@ -139,11 +139,11 @@ def generate_launch_description():
 		dual_imu_publisher,
 		lidar_3d_pointcloud,
 
-		# twist_mux_config_filepath_arg,  # TODO: twist_mux not built
-		# twist_mux,  # TODO: twist_mux not built
+		twist_mux_config_filepath_arg,  # TODO: twist_mux not built
+		twist_mux,  # TODO: twist_mux not built
 
-		# joy_node,  # TODO: joy package not built
-		# teleop_node,  # TODO: teleop_twist_joy not built
+		joy_node,  # TODO: joy package not built
+		teleop_node,  # TODO: teleop_twist_joy not built
 	]
 	"""ultrasonic_addr= [0x20,0x21,0x22,0x23,0x24,0x25,0x26,0x27]
 	for addr in ultrasonic_addr:

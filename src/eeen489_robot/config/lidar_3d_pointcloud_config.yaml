@@ -4,9 +4,14 @@ lidar_3d_pointcloud:
     imu_a_topic: "/imu_a"
     imu_b_topic: "/imu_b"
     output_topic: "/point_cloud_3d"
+    output_flat_scan_topic: "/scan_flat"
     pose_topic: "/lidar_pose"
     frame_id: "laser"
     reference_frame: "base_link"
+    flat_scan_enabled: true
+    flat_scan_slice_min_z_m: 0.005  # include points from 5 mm above ground
+    flat_scan_slice_max_z_m: 0.390  # include points up to 390 mm above ground
+    flat_scan_ground_offset_z_m: 0.308  # pitch pivot is 308 mm above ground
 
     stepper_enabled: true
     stepper_step_pin: 6
@@ -54,12 +59,15 @@ lidar_3d_pointcloud:
     output_mount_offset_x_m: 0.0  # lidar-to-pivot translation in meters, X axis in the sensor/pivot frame.
     output_mount_offset_y_m: 0.0  # lidar-to-pivot translation in meters, Y axis in the sensor/pivot frame.
     output_mount_offset_z_m: 0.0485  # lidar is 48.5 mm above the pitch pivot point.
+    output_pivot_offset_x_m: -0.035  # base_link -> pitch pivot X offset (matches static TF base_link->laser).
+    output_pivot_offset_y_m: 0.0  # base_link -> pitch pivot Y offset.
+    output_pivot_offset_z_m: 0.308  # base_link -> pitch pivot Z offset.
     output_cloud_sign_x: -1.0  # +1/-1 for cloud X axis (forward/backward inversion).
     output_cloud_sign_y: -1.0  # +1/-1 for cloud Y axis (left/right inversion).
     output_cloud_sign_z: 1.0  # +1/-1 for cloud Z axis (up/down inversion).
     stepper_home_pitch_deg: 0.0   # target IMU-relative pitch at home (0 = lidar IMU level with robot-body IMU).
     stepper_use_live_zero: true   # if true, wait for IMUs and actively home to stepper_home_pitch_deg.
-                  # if false, skip active homing and use stepper_home_pitch_deg as static center.
+            # if false, skip active homing and use stepper_home_pitch_deg as static center.
 
 dual_imu_publisher:
   ros__parameters:

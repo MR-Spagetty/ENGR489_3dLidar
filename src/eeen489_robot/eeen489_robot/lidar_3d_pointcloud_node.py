@@ -53,9 +53,14 @@ class Lidar3DCloudNode(Node):
         self.declare_parameter('imu_a_topic', '/imu_a')
         self.declare_parameter('imu_b_topic', '/imu_b')
         self.declare_parameter('output_topic', '/point_cloud_3d')
+        self.declare_parameter('output_flat_scan_topic', '/scan_flat')
         self.declare_parameter('pose_topic', '/lidar_pose')
         self.declare_parameter('frame_id', 'laser')
         self.declare_parameter('reference_frame', 'base_link')
+        self.declare_parameter('flat_scan_enabled', True)
+        self.declare_parameter('flat_scan_slice_min_z_m', 0.005, descriptor=numeric_param_descriptor)
+        self.declare_parameter('flat_scan_slice_max_z_m', 0.390, descriptor=numeric_param_descriptor)
+        self.declare_parameter('flat_scan_ground_offset_z_m', 0.308, descriptor=numeric_param_descriptor)
         self.declare_parameter('stepper_enabled', True)
         self.declare_parameter('stepper_step_pin', 17)
         self.declare_parameter('stepper_dir_pin', 27)
@@ -117,14 +122,30 @@ class Lidar3DCloudNode(Node):
         self.declare_parameter('output_mount_offset_x_m', 0.0, descriptor=numeric_param_descriptor)
         self.declare_parameter('output_mount_offset_y_m', 0.0, descriptor=numeric_param_descriptor)
         self.declare_parameter('output_mount_offset_z_m', 0.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_pivot_offset_x_m', 0.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_pivot_offset_y_m', 0.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('output_pivot_offset_z_m', 0.0, descriptor=numeric_param_descriptor)
 
         scan_topic = self.get_parameter('scan_topic').value
         imu_a_topic = self.get_parameter('imu_a_topic').value
         imu_b_topic = self.get_parameter('imu_b_topic').value
         output_topic = self.get_parameter('output_topic').value
+        output_flat_scan_topic = self.get_parameter('output_flat_scan_topic').value
         pose_topic = self.get_parameter('pose_topic').value
         self.frame_id = self.get_parameter('frame_id').value
         self.reference_frame = self.get_parameter('reference_frame').value
+        self.flat_scan_enabled = self.get_parameter('flat_scan_enabled').value
+        self.flat_scan_slice_min_z_m = self._get_float_parameter('flat_scan_slice_min_z_m', 0.005)
+        self.flat_scan_slice_max_z_m = self._get_float_parameter('flat_scan_slice_max_z_m', 0.390)
+        self.flat_scan_ground_offset_z_m = self._get_float_parameter('flat_scan_ground_offset_z_m', 0.308)
+        if self.flat_scan_slice_min_z_m > self.flat_scan_slice_max_z_m:
+            self.get_logger().warn(
+                'flat_scan_slice_min_z_m is greater than flat_scan_slice_max_z_m; swapping values.'
+            )
+            self.flat_scan_slice_min_z_m, self.flat_scan_slice_max_z_m = (
+                self.flat_scan_slice_max_z_m,
+                self.flat_scan_slice_min_z_m,
+            )
         self.stepper_enabled = self.get_parameter('stepper_enabled').value
         self.stepper_step_pin = self.get_parameter('stepper_step_pin').value
         self.stepper_dir_pin = self.get_parameter('stepper_dir_pin').value
@@ -235,6 +256,9 @@ class Lidar3DCloudNode(Node):
         self.output_mount_offset_x_m = self._get_float_parameter('output_mount_offset_x_m', 0.0)
         self.output_mount_offset_y_m = self._get_float_parameter('output_mount_offset_y_m', 0.0)
         self.output_mount_offset_z_m = self._get_float_parameter('output_mount_offset_z_m', 0.0)
+        self.output_pivot_offset_x_m = self._get_float_parameter('output_pivot_offset_x_m', 0.0)
+        self.output_pivot_offset_y_m = self._get_float_parameter('output_pivot_offset_y_m', 0.0)
+        self.output_pivot_offset_z_m = self._get_float_parameter('output_pivot_offset_z_m', 0.0)
         self.output_pose_roll_offset_rad = math.radians(self.output_pose_roll_offset_deg)
         self.output_pose_pitch_offset_rad = math.radians(self.output_pose_pitch_offset_deg)
         self.output_pose_yaw_offset_rad = math.radians(self.output_pose_yaw_offset_deg)
@@ -337,6 +361,7 @@ class Lidar3DCloudNode(Node):
         self.imu_a_sub = self.create_subscription(Imu, imu_a_topic, self.imu_a_callback, 10)
         self.imu_b_sub = self.create_subscription(Imu, imu_b_topic, self.imu_b_callback, 10)
         self.cloud_pub = self.create_publisher(PointCloud2, output_topic, 10)
+        self.flat_scan_pub = self.create_publisher(LaserScan, output_flat_scan_topic, 10)
         self.pose_pub = self.create_publisher(PoseStamped, pose_topic, 10)
 
         self.latest_scan = None
@@ -389,7 +414,16 @@ class Lidar3DCloudNode(Node):
 
         self.get_logger().info(
             f'Listening to {scan_topic}, {imu_a_topic}, {imu_b_topic}; '
-            f'publishing {output_topic} and {pose_topic}'
+            f'publishing {output_topic}, {output_flat_scan_topic}, and {pose_topic}'
+        )
+        self.get_logger().info(
+            'Flat scan: enabled=%s, z slice=[%.3f, %.3f] m above ground, pivot_ground_z=%.3f m.'
+            % (
+                self.flat_scan_enabled,
+                self.flat_scan_slice_min_z_m,
+                self.flat_scan_slice_max_z_m,
+                self.flat_scan_ground_offset_z_m,
+            )
         )
         self.get_logger().info(
             'Output frame signs: cloud_pitch=%+.0f pose_pitch=%+.0f cloud_xyz=[%+.0f,%+.0f,%+.0f]. '
@@ -424,6 +458,15 @@ class Lidar3DCloudNode(Node):
                 self.output_mount_offset_x_m,
                 self.output_mount_offset_y_m,
                 self.output_mount_offset_z_m,
+            )
+        )
+        self.get_logger().info(
+            'Pose pivot offset in %s frame: [x=%.3f, y=%.3f, z=%.3f] m.'
+            % (
+                self.reference_frame,
+                self.output_pivot_offset_x_m,
+                self.output_pivot_offset_y_m,
+                self.output_pivot_offset_z_m,
             )
         )
 
@@ -1125,11 +1168,73 @@ class Lidar3DCloudNode(Node):
         r21 = cp * sr
         r22 = cp * cr
 
-        pose.pose.position.x = r00 * mount_offset_x + r01 * mount_offset_y + r02 * mount_offset_z
-        pose.pose.position.y = r10 * mount_offset_x + r11 * mount_offset_y + r12 * mount_offset_z
-        pose.pose.position.z = r20 * mount_offset_x + r21 * mount_offset_y + r22 * mount_offset_z
+        pose.pose.position.x = (
+            self.output_pivot_offset_x_m
+            + r00 * mount_offset_x
+            + r01 * mount_offset_y
+            + r02 * mount_offset_z
+        )
+        pose.pose.position.y = (
+            self.output_pivot_offset_y_m
+            + r10 * mount_offset_x
+            + r11 * mount_offset_y
+            + r12 * mount_offset_z
+        )
+        pose.pose.position.z = (
+            self.output_pivot_offset_z_m
+            + r20 * mount_offset_x
+            + r21 * mount_offset_y
+            + r22 * mount_offset_z
+        )
 
         self.pose_pub.publish(pose)
+
+    def publish_flat_scan(self, scan_msg, points):
+        if not self.flat_scan_enabled:
+            return
+
+        flat_scan = LaserScan()
+        flat_scan.header.stamp = scan_msg.header.stamp
+        flat_scan.header.frame_id = self.frame_id
+        flat_scan.angle_min = scan_msg.angle_min
+        flat_scan.angle_max = scan_msg.angle_max
+        flat_scan.angle_increment = scan_msg.angle_increment
+        flat_scan.time_increment = scan_msg.time_increment
+        flat_scan.scan_time = scan_msg.scan_time
+        flat_scan.range_min = scan_msg.range_min
+        flat_scan.range_max = scan_msg.range_max
+
+        if flat_scan.angle_increment == 0.0 or flat_scan.angle_max <= flat_scan.angle_min:
+            return
+
+        beam_count = int(round((flat_scan.angle_max - flat_scan.angle_min) / flat_scan.angle_increment)) + 1
+        if beam_count <= 0:
+            return
+
+        ranges = [float('inf')] * beam_count
+        for x, y, z in points:
+            z_above_ground = z + self.flat_scan_ground_offset_z_m
+            if z_above_ground < self.flat_scan_slice_min_z_m or z_above_ground > self.flat_scan_slice_max_z_m:
+                continue
+
+            angle = math.atan2(y, x)
+            if angle < flat_scan.angle_min or angle > flat_scan.angle_max:
+                continue
+
+            beam = int(round((angle - flat_scan.angle_min) / flat_scan.angle_increment))
+            if beam < 0 or beam >= beam_count:
+                continue
+
+            rng = math.hypot(x, y)
+            if rng < flat_scan.range_min or rng > flat_scan.range_max:
+                continue
+
+            if rng < ranges[beam]:
+                ranges[beam] = rng
+
+        flat_scan.ranges = ranges
+        flat_scan.intensities = [0.0] * beam_count
+        self.flat_scan_pub.publish(flat_scan)
 
     def publish_3d_cloud(self, scan_msg):
         rel_pitch_measured = self.relative_pitch_rad()
@@ -1190,6 +1295,7 @@ class Lidar3DCloudNode(Node):
 
         point_cloud = point_cloud2.create_cloud_xyz32(header, points)
         self.cloud_pub.publish(point_cloud)
+        self.publish_flat_scan(scan_msg, points)
         self.publish_pose(scan_msg, rel_pitch=rel_pitch)
 
     def __del__(self):
