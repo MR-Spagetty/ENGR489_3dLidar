@@ -44,6 +44,8 @@ lidar_3d_pointcloud:
     stepper_scan_endpoint_recover_enabled: true
     stepper_scan_endpoint_recover_window_deg: 0.6  # if the model says it is already at the end but IMU says it is still short, trigger recovery.
     stepper_scan_endpoint_recover_step_deg: 0.5  # temporary internal re-anchor size used to force a few extra steps into the endpoint.
+    stepper_scan_endpoint_recover_max_cycles: 2  # keep endpoint recovery brief to avoid multi-second stalls at hard limits.
+    stepper_scan_top_endpoint_confirm_cycles: 2  # short confirmation to filter spikes without top-end dwell.
     stepper_scan_pi_max_step_deg: 2.5  # max PI command magnitude per loop.
     stepper_scan_pi_integral_limit_deg: 6.0  # anti-windup clamp for PI integral term.
     stepper_scan_escape_step_deg: 3.0  # immediate inward target offset after endpoint reversal.

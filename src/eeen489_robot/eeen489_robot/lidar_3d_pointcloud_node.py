@@ -103,6 +103,8 @@ class Lidar3DCloudNode(Node):
         self.declare_parameter('stepper_scan_endpoint_recover_enabled', True)
         self.declare_parameter('stepper_scan_endpoint_recover_window_deg', 0.6, descriptor=numeric_param_descriptor)
         self.declare_parameter('stepper_scan_endpoint_recover_step_deg', 0.5, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_scan_endpoint_recover_max_cycles', 2)
+        self.declare_parameter('stepper_scan_top_endpoint_confirm_cycles', 2)
         self.declare_parameter('stepper_scan_cloud_feedback_blend', 0.35, descriptor=numeric_param_descriptor)
         self.declare_parameter('output_cloud_drift_comp_enabled', True)
         self.declare_parameter('output_cloud_drift_comp_k', 0.12, descriptor=numeric_param_descriptor)
@@ -219,6 +221,22 @@ class Lidar3DCloudNode(Node):
         self.stepper_scan_endpoint_recover_step_deg = self._get_float_parameter(
             'stepper_scan_endpoint_recover_step_deg', 0.5
         )
+        self.stepper_scan_endpoint_recover_max_cycles = int(
+            self.get_parameter('stepper_scan_endpoint_recover_max_cycles').value
+        )
+        if self.stepper_scan_endpoint_recover_max_cycles <= 0:
+            self.get_logger().warn(
+                'stepper_scan_endpoint_recover_max_cycles must be > 0; forcing to 2.'
+            )
+            self.stepper_scan_endpoint_recover_max_cycles = 2
+        self.stepper_scan_top_endpoint_confirm_cycles = int(
+            self.get_parameter('stepper_scan_top_endpoint_confirm_cycles').value
+        )
+        if self.stepper_scan_top_endpoint_confirm_cycles <= 0:
+            self.get_logger().warn(
+                'stepper_scan_top_endpoint_confirm_cycles must be > 0; forcing to 2.'
+            )
+            self.stepper_scan_top_endpoint_confirm_cycles = 2
         self.stepper_scan_cloud_feedback_blend = self._get_float_parameter(
             'stepper_scan_cloud_feedback_blend', 0.35
         )
@@ -383,6 +401,8 @@ class Lidar3DCloudNode(Node):
         self.stepper_scan_prev_target_time = time.monotonic()
         self.stepper_scan_target_time = self.stepper_scan_prev_target_time
         self.stepper_scan_rel_bias = 0.0
+        self.stepper_scan_endpoint_recover_cycles = 0
+        self.stepper_scan_top_endpoint_confirm_count = 0
         self.output_cloud_drift_comp_rad = 0.0
         self.scan_rel_pitch_prev = None
         self.scan_rel_pitch_prev_time = None
@@ -720,21 +740,24 @@ class Lidar3DCloudNode(Node):
         except Exception as e:
             self.get_logger().warn(f'Stepper safe shutdown failed: {e}')
 
-    def _command_stepper_to_pitch(self, desired_pitch_rad):
+    def _command_stepper_to_pitch(self, desired_pitch_rad, limit_margin_rad=0.0):
         if not self.stepper_enabled:
             self.get_logger().warn('Pitch command ignored because stepper is disabled.')
             return
 
         lower_bound = self.stepper_home_pitch_rad + self.stepper_min_pitch_rad
         upper_bound = self.stepper_home_pitch_rad + self.stepper_max_pitch_rad
-        clamped_target = max(lower_bound, min(upper_bound, desired_pitch_rad))
+        limit_margin_rad = max(0.0, float(limit_margin_rad))
+        lower_bound_cmd = lower_bound - limit_margin_rad
+        upper_bound_cmd = upper_bound + limit_margin_rad
+        clamped_target = max(lower_bound_cmd, min(upper_bound_cmd, desired_pitch_rad))
         pitch_error = clamped_target - self.stepper_current_pitch
         self.get_logger().debug(
             f'Pitch command: desired={math.degrees(desired_pitch_rad):.2f} deg, '
             f'clamped={math.degrees(clamped_target):.2f} deg, '
             f'current={math.degrees(self.stepper_current_pitch):.2f} deg, '
             f'home={math.degrees(self.stepper_home_pitch_rad):.2f} deg, '
-            f'lower={math.degrees(lower_bound):.2f} deg, upper={math.degrees(upper_bound):.2f} deg, '
+            f'lower={math.degrees(lower_bound_cmd):.2f} deg, upper={math.degrees(upper_bound_cmd):.2f} deg, '
             f'error={math.degrees(pitch_error):.2f} deg.'
         )
 
@@ -760,8 +783,8 @@ class Lidar3DCloudNode(Node):
             self.stepper_current_pitch += steps / total_steps_per_rad
 
         self.stepper_target_pitch = max(
-            lower_bound,
-            min(upper_bound, self.stepper_current_pitch)
+            lower_bound_cmd,
+            min(upper_bound_cmd, self.stepper_current_pitch)
         )
         self.get_logger().info(
             f'Stepper now at {math.degrees(self.stepper_current_pitch):.2f} deg '
@@ -801,13 +824,31 @@ class Lidar3DCloudNode(Node):
         profile_rel = self.stepper_scan_target_rel
 
         if rel_feedback >= upper_rel_bound - limit_tol and self.stepper_scan_direction > 0.0:
-            self.stepper_scan_direction = -1.0
-            profile_rel = upper_rel_bound - self.stepper_scan_escape_step_rad
+            # Prevent single-sample IMU spikes from causing premature top reversal,
+            # but do not dwell/hold at the top because that causes endpoint vibration.
+            near_modeled_top = (
+                stepper_rel_pitch >= upper_rel_bound - self.stepper_scan_endpoint_recover_window_rad
+            )
+            if near_modeled_top:
+                self.stepper_scan_direction = -1.0
+                profile_rel = upper_rel_bound - self.stepper_scan_escape_step_rad
+                self.stepper_scan_top_endpoint_confirm_count = 0
+            else:
+                self.stepper_scan_top_endpoint_confirm_count += 1
+                if self.stepper_scan_top_endpoint_confirm_count >= self.stepper_scan_top_endpoint_confirm_cycles:
+                    self.stepper_scan_direction = -1.0
+                    profile_rel = upper_rel_bound - self.stepper_scan_escape_step_rad
+                    self.stepper_scan_top_endpoint_confirm_count = 0
+                else:
+                    profile_rel = self.stepper_scan_target_rel + max_scan_step
         elif rel_feedback <= lower_rel_bound + limit_tol and self.stepper_scan_direction < 0.0:
             self.stepper_scan_direction = 1.0
             profile_rel = lower_rel_bound + self.stepper_scan_escape_step_rad
+            self.stepper_scan_top_endpoint_confirm_count = 0
         else:
             profile_rel = self.stepper_scan_target_rel + (self.stepper_scan_direction * max_scan_step)
+            if self.stepper_scan_direction > 0.0 and rel_feedback < upper_rel_bound - limit_tol:
+                self.stepper_scan_top_endpoint_confirm_count = 0
         profile_rel = max(lower_rel_bound, min(upper_rel_bound, profile_rel))
 
         # Update long-term bias from low-lag IMU error, with stronger correction near limits.
@@ -846,6 +887,23 @@ class Lidar3DCloudNode(Node):
         endpoint_recovery_active = False
         endpoint_recovery_step = 0.0
         recovery_target = None
+        forced_reverse = False
+
+        # Top-end-only correction using relative pitch feedback:
+        # when moving upward and entering the endpoint window, add a bounded upward nudge
+        # so drift does not cause premature reversal before reaching the physical top band.
+        if (
+            self.stepper_scan_endpoint_correction_enabled
+            and self.stepper_scan_direction > 0.0
+            and rel_pitch is not None
+            and rel_feedback >= upper_rel_bound - self.stepper_scan_endpoint_window_rad
+        ):
+            endpoint_target_rel = upper_rel_bound
+            endpoint_error = endpoint_target_rel - rel_feedback
+            if endpoint_error > self.stepper_scan_endpoint_tolerance_rad:
+                endpoint_correction_active = True
+                endpoint_step = min(self.stepper_scan_endpoint_max_step_rad, endpoint_error)
+                commanded_rel = min(upper_rel_bound, commanded_rel + endpoint_step)
 
         if self.stepper_scan_endpoint_recover_enabled:
             lower_stall = (
@@ -858,15 +916,39 @@ class Lidar3DCloudNode(Node):
                 and rel_feedback < upper_rel_bound - limit_tol
                 and stepper_rel_pitch >= upper_rel_bound - self.stepper_scan_endpoint_recover_window_rad
             )
-            if lower_stall:
-                endpoint_recovery_active = True
-                endpoint_recovery_step = self.stepper_scan_endpoint_recover_step_rad
-                recovery_target = self.stepper_current_pitch - endpoint_recovery_step
-            elif upper_stall:
-                endpoint_recovery_active = True
-                endpoint_recovery_step = self.stepper_scan_endpoint_recover_step_rad
-                recovery_target = self.stepper_current_pitch + endpoint_recovery_step
+            if lower_stall or upper_stall:
+                self.stepper_scan_endpoint_recover_cycles += 1
+            else:
+                self.stepper_scan_endpoint_recover_cycles = 0
 
+            if lower_stall:
+                if self.stepper_scan_endpoint_recover_cycles >= self.stepper_scan_endpoint_recover_max_cycles:
+                    self.stepper_scan_direction = 1.0
+                    profile_rel = lower_rel_bound + self.stepper_scan_escape_step_rad
+                    self.stepper_scan_target_rel = max(lower_rel_bound, min(upper_rel_bound, profile_rel))
+                    commanded_rel = self.stepper_scan_target_rel
+                    self.stepper_scan_endpoint_recover_cycles = 0
+                    forced_reverse = True
+                else:
+                    endpoint_recovery_active = True
+                    endpoint_recovery_step = self.stepper_scan_endpoint_recover_step_rad
+                    recovery_target = self.stepper_current_pitch - endpoint_recovery_step
+            elif upper_stall:
+                if self.stepper_scan_endpoint_recover_cycles >= self.stepper_scan_endpoint_recover_max_cycles:
+                    self.stepper_scan_direction = -1.0
+                    profile_rel = upper_rel_bound - self.stepper_scan_escape_step_rad
+                    self.stepper_scan_target_rel = max(lower_rel_bound, min(upper_rel_bound, profile_rel))
+                    commanded_rel = self.stepper_scan_target_rel
+                    self.stepper_scan_endpoint_recover_cycles = 0
+                    forced_reverse = True
+                else:
+                    endpoint_recovery_active = True
+                    endpoint_recovery_step = self.stepper_scan_endpoint_recover_step_rad
+                    recovery_target = self.stepper_current_pitch + endpoint_recovery_step
+        else:
+            self.stepper_scan_endpoint_recover_cycles = 0
+
+        recovery_margin = 0.0
         if recovery_target is not None:
             target = recovery_target
             recovery_margin = self.stepper_scan_endpoint_recover_step_rad
@@ -905,6 +987,9 @@ class Lidar3DCloudNode(Node):
             f'endpoint_correction={1 if endpoint_correction_active else 0}, '
             f'endpoint_recovery={1 if endpoint_recovery_active else 0}, '
             f'endpoint_recovery_step={math.degrees(endpoint_recovery_step):.2f} deg, '
+            f'endpoint_recovery_cycles={self.stepper_scan_endpoint_recover_cycles}, '
+            f'forced_reverse={1 if forced_reverse else 0}, '
+            f'top_confirm={self.stepper_scan_top_endpoint_confirm_count}/{self.stepper_scan_top_endpoint_confirm_cycles}, '
             f'commanded_rel={math.degrees(commanded_rel):.2f} deg, '
             f'target_delta={math.degrees(target_delta):.2f} deg, '
             f'limit_tol={math.degrees(limit_tol):.2f} deg, '
@@ -912,7 +997,7 @@ class Lidar3DCloudNode(Node):
             f'upper={math.degrees(upper_bound):.2f} deg, '
             f'command={math.degrees(target):.2f} deg.'
         )
-        self._command_stepper_to_pitch(target)
+        self._command_stepper_to_pitch(target, limit_margin_rad=recovery_margin)
 
     def imu_a_callback(self, msg):
         self.imu_a = msg
