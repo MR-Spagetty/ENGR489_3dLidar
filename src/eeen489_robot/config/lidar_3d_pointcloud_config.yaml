@@ -20,7 +20,7 @@ lidar_3d_pointcloud:
     stepper_enable_pin: -1
     stepper_enable_active_low: true
     stepper_dir_invert: true
-    stepper_test_steps: 100
+    stepper_test_steps: 0
     stepper_steps_per_rev: 32           # 28BYJ-48 geared stepper: 32 steps per motor revolution
     stepper_gear_ratio: 64.0            # Internal 1:64 gearbox on the 28BYJ-48
     stepper_microsteps: 1               # 28BYJ-48 on a ULN2003 is not microstepped in this setup.

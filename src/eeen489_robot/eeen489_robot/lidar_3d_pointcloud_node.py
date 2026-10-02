@@ -535,28 +535,6 @@ class Lidar3DCloudNode(Node):
     def _sign_from_value(self, value):
         return 1.0 if float(value) >= 0.0 else -1.0
 
-    def _force_stepper_stable(self):
-        """Force a stable LOW state on the step/direction pins so the stepper does
-        not wander when no software control is active."""
-        try:
-            if self.use_gpiozero:
-                if self.stepper_step is not None:
-                    self.stepper_step.off()
-                if self.stepper_dir is not None:
-                    self.stepper_dir.off()
-                if self.stepper_enable is not None:
-                    self.stepper_enable.off() if self.stepper_enable_active_low else self.stepper_enable.on()
-            elif GPIO is not None:
-                GPIO.output(self.stepper_step_pin, GPIO.LOW)
-                GPIO.output(self.stepper_dir_pin, GPIO.LOW)
-                if self.stepper_enable_pin >= 0:
-                    GPIO.output(
-                        self.stepper_enable_pin,
-                        GPIO.HIGH if self.stepper_enable_active_low else GPIO.LOW,
-                    )
-        except Exception as e:
-            self.get_logger().warn(f'Failed to force the stepper to a stable state: {e}')
-
     def _setup_stepper(self):
         # Try gpiozero first (Pi 5 compatible), fall back to RPi.GPIO
         if OutputDevice is not None:
@@ -760,14 +738,12 @@ class Lidar3DCloudNode(Node):
                 self.stepper_homing_in_progress = False
 
     def _safe_stepper_shutdown(self):
-        self.get_logger().info('Putting stepper in a safe shutdown state with stable LOW pins.')
+        self.get_logger().info('Putting stepper in to home')
 
         try:
             if self.stepper_enabled:
                 self._command_stepper_to_pitch(self.stepper_home_pitch_rad)
                 self.stepper_current_pitch = self.stepper_home_pitch_rad
-
-            self._force_stepper_stable()
             self.stepper_enabled = False
         except Exception as e:
             self.get_logger().warn(f'Stepper safe shutdown failed: {e}')
