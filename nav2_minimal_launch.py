@@ -1,3 +1,10 @@
+"""Minimal Nav2 bring-up for a map-based localization and navigation stack.
+
+This launch file prepares a static map, starts the localization nodes, and then
+boots the core Nav2 controllers and planners. The remappings keep the planner and
+controller output from colliding with the robot's main velocity command topic.
+"""
+
 import os
 
 from launch import LaunchDescription
@@ -8,6 +15,12 @@ from nav2_common.launch import RewrittenYaml
 
 
 def generate_launch_description():
+    """Return the ROS 2 launch description for the minimal map + navigation stack.
+
+    The YAML file contains the common Nav2 parameters. RewrittenYaml ensures the
+    autostart flag is forced on for the lifecycle managers even when the source
+    configuration leaves it unset.
+    """
     params_file = LaunchConfiguration("params_file")
     map_file = LaunchConfiguration("map")
 
@@ -18,11 +31,14 @@ def generate_launch_description():
         convert_types=True,
     )
 
+    # These nodes must be lifecycle-managed during the localization phase.
     lifecycle_nodes = [
         "map_server",
         "amcl",
     ]
 
+    # These nodes are started after localization and represent the active path
+    # planning and execution stack.
     navigation_lifecycle_nodes = [
         "controller_server",
         "planner_server",
@@ -32,10 +48,12 @@ def generate_launch_description():
     ]
 
     return LaunchDescription([
+        # Required command-line arguments: path to Nav2 YAML and the map to load.
         DeclareLaunchArgument("params_file"),
         DeclareLaunchArgument("map"),
 
-        # Localization
+        # Localization stage: map and AMCL initialize first so the robot has a
+        # known frame and pose estimate before navigation logic starts.
         Node(
             package="nav2_map_server",
             executable="map_server",
@@ -66,7 +84,9 @@ def generate_launch_description():
             }],
         ),
 
-        # Navigation
+        # Navigation stage: planning and execution nodes start after localization.
+        # The command remaps separate the autonomous nav commands from the base
+        # teleop or joystick velocity stream used elsewhere in the system.
         Node(
             package="nav2_controller",
             executable="controller_server",
