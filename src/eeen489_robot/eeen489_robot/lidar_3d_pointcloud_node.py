@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""Generate a 3D LiDAR point cloud from a 2D scan and dual-IMU pitch estimate.
+
+The node subscribes to LaserScan and IMU messages, estimates the platform's
+relative pitch between the moving sensor and the fixed robot frame, and projects
+scan points into a 3D cloud using the current tilt. The code also supports a
+stepper-driven scan sweep so the laser can pitch across a range of angles while
+maintaining a consistent reference frame.
+"""
 
 import atexit
 import math
@@ -45,6 +53,7 @@ class Lidar3DCloudNode(Node):
     """
 
     def __init__(self):
+        """Initialize ROS parameters, the stepper controller, and the LiDAR/IMU subscriptions."""
         super().__init__('lidar_3d_pointcloud_node')
 
         numeric_param_descriptor = ParameterDescriptor(dynamic_typing=True)
@@ -522,7 +531,13 @@ class Lidar3DCloudNode(Node):
             )
         )
 
-    def _get_float_parameter(self, name, default_value):
+    def _get_float_parameter(self, name: str, default_value: float) -> float:
+        """Return a float parameter with a safe fallback if it is unset.
+
+        Many of the scan and stepper tuning values are optional in development and
+        may be left at their defaults. This helper keeps the parameter parsing
+        consistent across dynamic float values with no runtime failures.
+        """
         raw_value = self.get_parameter(name).value
         try:
             return float(raw_value)
@@ -532,10 +547,15 @@ class Lidar3DCloudNode(Node):
             )
             return float(default_value)
 
-    def _sign_from_value(self, value):
+    def _sign_from_value(self, value: float) -> float:
         return 1.0 if float(value) >= 0.0 else -1.0
 
     def _setup_stepper(self):
+        """Sets up the stepper motor with the GPIO library.
+
+        Tries to use gpiozero first (Pi 5 compatible), and falls back to RPi.GPIO if gpiozero is not available.
+        Initializes the step, direction, and enable pins according to the configuration parameters.
+        """
         # Try gpiozero first (Pi 5 compatible), fall back to RPi.GPIO
         if OutputDevice is not None:
             try:
@@ -589,7 +609,7 @@ class Lidar3DCloudNode(Node):
             self.get_logger().warn(f'GPIO hardware not accessible: {e}; stepper control disabled.')
             self.stepper_enabled = False
 
-    def _set_stepper_direction(self, direction):
+    def _set_stepper_direction(self, direction: int):
         if not self.stepper_enabled:
             return
 
@@ -602,11 +622,10 @@ class Lidar3DCloudNode(Node):
                 self.stepper_dir.on()
             else:
                 self.stepper_dir.off()
-        else:
-            if GPIO is not None:
-                GPIO.output(self.stepper_dir_pin, GPIO.HIGH if direction > 0 else GPIO.LOW)
+        elif GPIO is not None:
+            GPIO.output(self.stepper_dir_pin, GPIO.HIGH if direction > 0 else GPIO.LOW)
 
-    def _step_stepper(self, steps):
+    def _step_stepper(self, steps: int):
         if not self.stepper_enabled or steps == 0:
             return
 
@@ -619,15 +638,19 @@ class Lidar3DCloudNode(Node):
                 time.sleep(self.stepper_pulse_half_period_s)
                 self.stepper_step.off()
                 time.sleep(self.stepper_pulse_half_period_s)
-        else:
-            if GPIO is not None:
-                for _ in range(abs(steps)):
-                    GPIO.output(self.stepper_step_pin, GPIO.HIGH)
-                    time.sleep(self.stepper_pulse_half_period_s)
-                    GPIO.output(self.stepper_step_pin, GPIO.LOW)
-                    time.sleep(self.stepper_pulse_half_period_s)
+        elif GPIO is not None:
+            for _ in range(abs(steps)):
+                GPIO.output(self.stepper_step_pin, GPIO.HIGH)
+                time.sleep(self.stepper_pulse_half_period_s)
+                GPIO.output(self.stepper_step_pin, GPIO.LOW)
+                time.sleep(self.stepper_pulse_half_period_s)
 
-    def _run_stepper_self_test(self, test_steps):
+    def _run_stepper_self_test(self, test_steps: int):
+        """Simple visual test of the stepper to check that it is connected and working
+
+        Args:
+            test_steps (int): the number of steps to move the stepper motor forward and backward during the self-test.
+        """
         # A short forward/backward pulse test helps confirm wiring and GPIO control.
         self.get_logger().info(f'Running stepper self-test with {test_steps} steps forward/backward.')
         self._step_stepper(test_steps)
@@ -635,6 +658,10 @@ class Lidar3DCloudNode(Node):
         self._step_stepper(-test_steps)
 
     def _home_stepper_to_zero(self):
+        """Attempt to find a stable level position for the absolute home of the platform.
+
+        This method uses the IMU readings to iteratively adjust the stepper motor until the platform reaches the desired relative pitch.
+        """
         if not self.stepper_enabled:
             self.get_logger().warn('Stepper homing skipped because stepper is disabled.')
             return
@@ -711,6 +738,11 @@ class Lidar3DCloudNode(Node):
         self.stepper_homed = True
 
     def _maybe_home_stepper(self):
+        """rotate platform to the home position using the stepper motor and IMU feedback.
+
+        This method checks various conditions to determine if homing is necessary and safe, and if so,
+        it initiates the homing process in a separate worker thread.
+        """
         if not self.stepper_enabled:
             return
         if self.stepper_homed:
@@ -731,6 +763,10 @@ class Lidar3DCloudNode(Node):
         threading.Thread(target=self._home_stepper_worker, daemon=True).start()
 
     def _home_stepper_worker(self):
+        """Worker thread that performs the stepper homing procedure.
+
+        This method calls the actual homing function and ensures that the homing-in-progress flag is properly cleared afterward.
+        """
         try:
             self._home_stepper_to_zero()
         finally:
@@ -738,6 +774,10 @@ class Lidar3DCloudNode(Node):
                 self.stepper_homing_in_progress = False
 
     def _safe_stepper_shutdown(self):
+        """Safely shuts down the stepper motor by moving it to the home position and disabling it.
+
+        This method attempts to command the stepper to the home pitch and then disables it, catching any exceptions that may occur during the process.
+        """
         self.get_logger().info('Putting stepper in to home')
 
         try:
@@ -748,7 +788,15 @@ class Lidar3DCloudNode(Node):
         except Exception as e:
             self.get_logger().warn(f'Stepper safe shutdown failed: {e}')
 
-    def _command_stepper_to_pitch(self, desired_pitch_rad, limit_margin_rad=0.0):
+    def _command_stepper_to_pitch(self, desired_pitch_rad: float, limit_margin_rad: float = 0.0):
+        """Commands the stepper motor to move to the specified pitch angle.
+
+        Args:
+            desired_pitch_rad (float): The target pitch angle in radians.
+            limit_margin_rad (float, optional): The margin to apply to the pitch limits. Defaults to 0.0.
+
+        This method clamps the desired pitch within the allowed range, calculates the required stepper steps, and commands the stepper motor to move accordingly.
+        """
         if not self.stepper_enabled:
             self.get_logger().warn('Pitch command ignored because stepper is disabled.')
             return
@@ -800,6 +848,11 @@ class Lidar3DCloudNode(Node):
         )
 
     def _stepper_scan_loop(self):
+        """Main loop for performing stepper motor scanning.
+
+        This method checks various conditions to determine if scanning should proceed, calculates the relative pitch bounds,
+        and uses IMU feedback to adjust the stepper motor position accordingly.
+        """
         if (
             not self.stepper_enabled
             or not self.stepper_scan_enabled
@@ -1049,16 +1102,40 @@ class Lidar3DCloudNode(Node):
         self._command_stepper_to_pitch(target, limit_margin_rad=recovery_margin)
 
     def imu_a_callback(self, msg):
+        """Callback function for IMU A messages.
+
+        Args:
+            msg: The incoming IMU message for IMU A.
+
+        This method updates the stored IMU A reading, recalculates the relative pitch estimate,
+        and checks if the stepper motor needs to be homed.
+        """
         self.imu_a = msg
         self._update_relative_pitch_estimate()
         self._maybe_home_stepper()
 
     def imu_b_callback(self, msg):
+        """Callback function for IMU B messages.
+
+        Args:
+            msg: The incoming IMU message for IMU B.
+
+        This method updates the stored IMU B reading, recalculates the relative pitch estimate,
+        and checks if the stepper motor needs to be homed.
+        """
         self.imu_b = msg
         self._update_relative_pitch_estimate()
         self._maybe_home_stepper()
 
     def scan_callback(self, msg):
+        """Callback function for incoming LIDAR scan messages.
+
+        Args:
+            msg: The incoming LIDAR scan message.
+
+        This method checks if both IMU readings are available, updates the latest scan,
+        and publishes the corresponding 3D point cloud.
+        """
         if self.imu_a is None or self.imu_b is None:
             self.get_logger().debug('Waiting for both IMU readings before generating point cloud.')
             return
@@ -1071,10 +1148,15 @@ class Lidar3DCloudNode(Node):
         self.publish_3d_cloud(msg)
 
     def _update_relative_pitch_estimate(self):
+        """Updates the relative pitch estimate based on the latest IMU readings.
+
+        This method calculates the relative pitch between IMU A and IMU B, applies a low-pass filter,
+        and stores the result along with the timestamp of the update.
+        """
         if self.imu_a is None or self.imu_b is None:
             return
 
-        rel_pitch = self.imu_pitch_rad(self.imu_a) - self.imu_pitch_rad(self.imu_b)
+        rel_pitch = self.imu_pitch_rad(self.imu_a) - self.imu_pitch_rad(self.imu_b) # TODO try switch this to a didrect relative calculation
         self.latest_relative_pitch = rel_pitch
 
         if self.relative_pitch_filtered is None:
@@ -1084,7 +1166,15 @@ class Lidar3DCloudNode(Node):
             self.relative_pitch_filtered = (alpha * rel_pitch) + ((1.0 - alpha) * self.relative_pitch_filtered)
         self.relative_pitch_last_time = time.monotonic()
 
-    def imu_pitch_rad(self, imu_msg):
+    def imu_pitch_rad(self, imu_msg) -> float:
+        """Calculates the pitch angle from an IMU message.
+
+        Args:
+            imu_msg: The incoming IMU message.
+
+        Returns:
+            The pitch angle in radians, following the sensor's axis convention.
+        """
         ax = imu_msg.linear_acceleration.x
         ay = imu_msg.linear_acceleration.y
         az = imu_msg.linear_acceleration.z
@@ -1094,15 +1184,12 @@ class Lidar3DCloudNode(Node):
         # The current sensor mounting reports the opposite sign, so flip it here.
         return -math.atan2(-ax, math.sqrt(ay * ay + az * az))
 
-    def average_relative_pitch_rad(self, samples=10, delay_s=0.02):
-        # Non-blocking estimate based on latest IMU updates.
-        # Keep function for compatibility with existing call sites.
-        _ = samples
-        _ = delay_s
-        self._update_relative_pitch_estimate()
-        return self.relative_pitch_filtered
+    def relative_pitch_rad(self) -> float:
+        """Returns the current relative pitch between IMU A and IMU B in radians.
 
-    def relative_pitch_rad(self):
+        Returns:
+            The relative pitch in radians, or None if the IMU readings are not available.
+        """
         if self.imu_a is None or self.imu_b is None:
             self.get_logger().debug('Relative pitch requested but IMU A or B not ready yet.')
             return None
@@ -1117,7 +1204,16 @@ class Lidar3DCloudNode(Node):
         )
         return rel_pitch
 
-    def _scan_rel_pitch_window(self, scan_msg, rel_pitch_now):
+    def _scan_rel_pitch_window(self, scan_msg, rel_pitch_now: float) -> tuple[float|None, float|None]:
+        """Calculates the start and end relative pitch for a given scan based on the current relative pitch.
+
+        Args:
+            scan_msg: The incoming scan message.
+            rel_pitch_now: The current relative pitch between IMU A and IMU B in radians.
+
+        Returns:
+            A tuple containing the start and end relative pitch for the scan, each in radians, or None if not available.
+        """
         if rel_pitch_now is None:
             return (None, None)
 
@@ -1155,6 +1251,12 @@ class Lidar3DCloudNode(Node):
         return (rel_pitch_start, rel_pitch_end)
 
     def _compensate_cloud_rel_pitch(self, rel_pitch_nominal, rel_pitch_measured):
+        """Apply a gentle drift compensation to the nominal relative pitch.
+
+        The stepper controller often knows the commanded pitch, while the IMUs
+        provide the measured pitch. The compensated value smooths the cloud output
+        toward the actual platform motion while keeping the output bounded.
+        """
         if rel_pitch_nominal is None:
             return rel_pitch_measured
         if rel_pitch_measured is None:
@@ -1176,6 +1278,12 @@ class Lidar3DCloudNode(Node):
         return max(lower_rel_bound, min(upper_rel_bound, corrected_rel_pitch))
 
     def build_cloud_from_scan(self, scan_msg, rel_pitch=None, rel_pitch_start=None, rel_pitch_end=None):
+        """Project a LaserScan into 3D Cartesian coordinates using the current pitch.
+
+        Each range sample is treated as a point in the laser frame and then rotated
+        about the sensor's pitch offset so the cloud matches the robot's true tilt
+        at the time the scan was captured.
+        """
         if rel_pitch is None:
             rel_pitch = self.relative_pitch_rad()
         if rel_pitch is None:
@@ -1255,6 +1363,7 @@ class Lidar3DCloudNode(Node):
         return points
 
     def publish_pose(self, scan_msg, rel_pitch=None):
+        """Publish the estimated pose of the laser frame in the robot reference frame."""
         if rel_pitch is None:
             rel_pitch = self.relative_pitch_rad()
         if rel_pitch is None:
@@ -1324,6 +1433,12 @@ class Lidar3DCloudNode(Node):
         self.pose_pub.publish(pose)
 
     def publish_flat_scan(self, scan_msg, points):
+        """Project the 3D cloud onto a ground-aligned 2D laser scan for debugging.
+
+        This output keeps only the points in a configurable vertical slice and emits
+        a simplified LaserScan whose ranges represent the projected footprint on the
+        ground plane.
+        """
         if not self.flat_scan_enabled:
             return
 
@@ -1371,6 +1486,12 @@ class Lidar3DCloudNode(Node):
         self.flat_scan_pub.publish(flat_scan)
 
     def publish_3d_cloud(self, scan_msg):
+        """Convert the latest scan into a published 3D point cloud.
+
+        The method blends the measured IMU pitch with the commanded stepper pitch
+        when a scan sweep is active and then publishes both the cloud and a pose
+        estimate for downstream registration and visualization.
+        """
         rel_pitch_measured = self.relative_pitch_rad()
         rel_pitch_nominal = rel_pitch_measured
         if self.stepper_scan_enabled and self.scan_rel_pitch_now is not None:
@@ -1433,6 +1554,7 @@ class Lidar3DCloudNode(Node):
         self.publish_pose(scan_msg, rel_pitch=rel_pitch)
 
     def __del__(self):
+        """Best-effort cleanup when the node is being torn down."""
         try:
             self._safe_stepper_shutdown()
         except Exception:
@@ -1440,6 +1562,7 @@ class Lidar3DCloudNode(Node):
 
 
 def main(args=None):
+    """Entry point for the LiDAR 3D cloud node."""
     rclpy.init(args=args)
     node = Lidar3DCloudNode()
 

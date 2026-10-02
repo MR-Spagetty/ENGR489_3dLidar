@@ -1,4 +1,11 @@
 #!/usr/bin/env python3
+"""ROS publisher for the robot's dual LSM6DSOX IMU array.
+
+This node reads acceleration and gyroscope data from two IMUs on the same I2C
+bus and republishes each stream as a standard ROS Imu message. The design keeps
+sensor A on the moving platform and sensor B fixed to the robot body so that the
+relative pitch can be estimated by downstream perception nodes.
+"""
 
 import math
 
@@ -26,11 +33,13 @@ except ImportError as exc:  # pragma: no cover - runtime dependency is hardware-
 class DualImuPublisherNode(Node):
     """Publish IMU data for the two LSM6DSOX sensors on the robot.
 
-    Sensor A is mounted on the moving platform.
-    Sensor B is fixed relative to the robot body.
+    Sensor A is mounted on the moving platform while sensor B stays fixed to the
+    robot body. Downstream logic can compute the relative tilt between the two
+    sensors by comparing the published IMU streams.
     """
 
     def __init__(self):
+        """Initialize the ROS node and the two IMU devices on the configured bus."""
         super().__init__('dual_imu_publisher_node')
 
         self.declare_parameter('i2c_bus', 1)
@@ -55,6 +64,10 @@ class DualImuPublisherNode(Node):
             f'Initializing dual LSM6DSOX IMU stream on I2C bus {self.bus_id}'
         )
 
+        # The two sensors share the same bus, but each chip has a unique I2C slave
+        # address. They are intentionally treated as independent streams so the
+        # relative motion between the sensor platform and the robot body can be
+        # computed later in the perception system.
         self.i2c = LockedI2CBus(self.bus_id)
         self.sensor_a = lsm6dsox.LSM6DSOX(self.i2c, address=self.sensor_a_address)
         self.sensor_b = lsm6dsox.LSM6DSOX(self.i2c, address=self.sensor_b_address)
@@ -68,6 +81,13 @@ class DualImuPublisherNode(Node):
         )
 
     def make_imu_msg(self, sensor, frame_id):
+        """Convert one sensor readout into a ROS Imu message.
+
+        The function preserves the sensor's acceleration and angular velocity,
+        leaves orientation as identity, and marks the covariance fields as
+        unknown because the robot does not estimate a full orientation solution in
+        this node.
+        """
         msg = Imu()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = frame_id
@@ -94,7 +114,8 @@ class DualImuPublisherNode(Node):
         msg.orientation.y = 0.0
         msg.orientation.z = 0.0
 
-        # Mark covariance as unknown for the orientation and angular rate.
+        # ROS convention uses -1.0 in the first covariance slot to indicate that
+        # a quantity is not yet estimated or is intentionally unknown.
         msg.orientation_covariance[0] = -1.0
         msg.angular_velocity_covariance[0] = -1.0
         msg.linear_acceleration_covariance[0] = -1.0
@@ -102,6 +123,7 @@ class DualImuPublisherNode(Node):
         return msg
 
     def timer_callback(self):
+        """Publish the latest data from both IMUs at the configured rate."""
         imu_a_msg = self.make_imu_msg(self.sensor_a, self.frame_id_a)
         imu_b_msg = self.make_imu_msg(self.sensor_b, self.frame_id_b)
 
@@ -110,6 +132,7 @@ class DualImuPublisherNode(Node):
 
 
 def main(args=None):
+    """Launch the node and block until ROS shutdown is requested."""
     rclpy.init(args=args)
     node = DualImuPublisherNode()
     try:
