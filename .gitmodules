@@ -1,0 +1,30 @@
+[submodule "src/angles"]
+	path = src/angles
+	url = https://github.com/ros/angles.git
+[submodule "src/backward_ros"]
+	path = src/backward_ros
+	url = https://github.com/pal-robotics/backward_ros.git
+[submodule "src/BehaviorTree.CPP"]
+	path = src/BehaviorTree.CPP
+	url = https://github.com/BehaviorTree/BehaviorTree.CPP.git
+[submodule "src/bond_core"]
+	path = src/bond_core
+	url = https://github.com/ros/bond_core.git
+[submodule "src/geographic_info"]
+	path = src/geographic_info
+	url = https://github.com/ros-geographic-info/geographic_info.git
+[submodule "src/laser_geometry"]
+	path = src/laser_geometry
+	url = https://github.com/ros-perception/laser_geometry.git
+[submodule "src/navigation2"]
+	path = src/navigation2
+	url = https://github.com/ros-navigation/navigation2.git
+[submodule "src/robot_localization"]
+	path = src/robot_localization
+	url = https://github.com/cra-ros-pkg/robot_localization.git
+[submodule "src/vision_opencv"]
+	path = src/vision_opencv
+	url = https://github.com/ros-perception/vision_opencv.git
+[submodule "src/diagnostics"]
+	path = src/diagnostics
+	url = https://github.com/ros/diagnostics.git
