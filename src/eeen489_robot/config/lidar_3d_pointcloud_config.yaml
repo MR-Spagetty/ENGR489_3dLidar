@@ -11,7 +11,8 @@ lidar_3d_pointcloud:
     flat_scan_enabled: true
     flat_scan_slice_min_z_m: 0.005  # include points from 5 mm above ground
     flat_scan_slice_max_z_m: 0.390  # include points up to 390 mm above ground
-    flat_scan_ground_offset_z_m: 0.308  # pitch pivot is 308 mm above ground
+    flat_scan_ground_offset_z_m: 0.308  # ground -> pitch pivot height in meters
+    flat_scan_ground_offset_includes_mount_offset: false  # mount offset is already embedded in point z before ground conversion
 
     stepper_enabled: true
     stepper_step_pin: 6
@@ -24,19 +25,22 @@ lidar_3d_pointcloud:
     stepper_gear_ratio: 64.0            # Internal 1:64 gearbox on the 28BYJ-48
     stepper_microsteps: 1               # 28BYJ-48 on a ULN2003 is not microstepped in this setup.
                                        # Using 2 here doubles the commanded motion and makes a 45° request behave like 90°.
-    stepper_step_delay_s: 0.001
-    stepper_max_rate_hz: 500.0
+    stepper_step_delay_s: 0.0013
+    stepper_max_rate_hz: 420.0
     stepper_min_move_rad: 0.002
     stepper_min_pitch_deg: -45.0  # lower scan limit in degrees, relative to the measured mechanical home.
-    stepper_max_pitch_deg: 45.0   # upper scan limit in degrees, relative to the measured mechanical home.
+    stepper_max_pitch_deg: 28.0   # upper scan limit in degrees, relative to the measured mechanical home.
     stepper_scan_limit_tolerance_deg: 1.5  # reversal tolerance around limits; slightly wider band reduces endpoint chatter.
-    stepper_scan_step_deg: 2.0  # base sweep increment per control tick.
+    stepper_scan_step_deg: 1.4  # base sweep increment per control tick.
     stepper_scan_ease_zone_deg: 12.0  # distance from endpoints where speed tapers for ease-in/ease-out.
     stepper_scan_min_speed_scale: 0.35  # minimum speed fraction at the very edge of the ease zone.
     stepper_scan_pi_kp: 0.7  # proportional gain for tracking the sweep target with relative pitch feedback.
     stepper_scan_pi_ki: 0.03  # integral gain to remove steady-state tracking bias.
-    stepper_scan_drift_k: 0.025  # lower gain to avoid drift over-correction while scanning in motion.
-    stepper_scan_drift_max_step_deg: 0.04  # cap bias change per control tick to prevent runaway bias.
+    stepper_scan_drift_k: 0.01  # lower gain to avoid drift over-correction while scanning in motion.
+    stepper_scan_drift_max_step_deg: 0.02  # cap bias change per control tick to prevent runaway bias.
+    stepper_scan_drift_limit_deg: 3.0  # anti-windup clamp for the scan drift bias.
+    stepper_scan_drift_error_gate_deg: 8.0  # ignore implausibly large drift errors and bleed bias back toward zero.
+    stepper_scan_drift_endpoint_only: true  # update drift bias only near sweep ends; bleed to zero through mid-sweep.
     stepper_scan_endpoint_correction_enabled: true
     stepper_scan_endpoint_tolerance_deg: 0.8  # if measured pitch misses an end by more than this, hold and correct before reversing.
     stepper_scan_endpoint_window_deg: 3.0  # engage endpoint correction only near the ends of travel.
@@ -46,18 +50,20 @@ lidar_3d_pointcloud:
     stepper_scan_endpoint_recover_step_deg: 0.5  # temporary internal re-anchor size used to force a few extra steps into the endpoint.
     stepper_scan_endpoint_recover_max_cycles: 2  # keep endpoint recovery brief to avoid multi-second stalls at hard limits.
     stepper_scan_top_endpoint_confirm_cycles: 2  # short confirmation to filter spikes without top-end dwell.
+    stepper_scan_use_imu_feedback: false  # use stepper-relative feedback for sweep control to avoid IMU-induced drift.
+    stepper_scan_feedback_error_gate_deg: 12.0  # if IMU-relative pitch disagrees too much with stepper estimate, trust stepper for sweep control.
     stepper_scan_pi_max_step_deg: 2.5  # max PI command magnitude per loop.
     stepper_scan_pi_integral_limit_deg: 6.0  # anti-windup clamp for PI integral term.
-    stepper_scan_escape_step_deg: 3.0  # immediate inward target offset after endpoint reversal.
+    stepper_scan_escape_step_deg: 2.0  # immediate inward target offset after endpoint reversal.
     output_pitch_sign: 1.0  # legacy fallback for pitch sign; overridden by the specific cloud/pose pitch signs below.
     output_cloud_pitch_sign: 1.0  # +1/-1 pitch sign used when rotating scan into 3D cloud.
-    output_pose_pitch_sign: -1.0  # +1/-1 pitch sign used when publishing lidar pose orientation.
+    output_pose_pitch_sign: 1.0  # +1/-1 pitch sign used when publishing lidar pose orientation.
     output_pose_roll_offset_deg: 0.0  # additive roll offset for published pose frame.
     output_pose_pitch_offset_deg: 0.0  # additive pitch offset for published pose frame.
-    output_pose_yaw_offset_deg: 180.0  # additive yaw offset for pose orientation.
+    output_pose_yaw_offset_deg: 0.0  # additive yaw offset for pose orientation.
     output_cloud_roll_offset_deg: 0.0  # additive roll offset for cloud transform.
     output_cloud_pitch_offset_deg: 0.0  # additive pitch offset for cloud transform.
-    output_cloud_yaw_offset_deg: 180.0  # additive yaw offset for cloud transform.
+    output_cloud_yaw_offset_deg: 0.0  # additive yaw offset for cloud transform.
     output_mount_offset_x_m: 0.0  # lidar-to-pivot translation in meters, X axis in the sensor/pivot frame.
     output_mount_offset_y_m: 0.0  # lidar-to-pivot translation in meters, Y axis in the sensor/pivot frame.
     output_mount_offset_z_m: 0.0485  # lidar is 48.5 mm above the pitch pivot point.

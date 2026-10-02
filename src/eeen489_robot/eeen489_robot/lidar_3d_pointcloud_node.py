@@ -61,6 +61,7 @@ class Lidar3DCloudNode(Node):
         self.declare_parameter('flat_scan_slice_min_z_m', 0.005, descriptor=numeric_param_descriptor)
         self.declare_parameter('flat_scan_slice_max_z_m', 0.390, descriptor=numeric_param_descriptor)
         self.declare_parameter('flat_scan_ground_offset_z_m', 0.308, descriptor=numeric_param_descriptor)
+        self.declare_parameter('flat_scan_ground_offset_includes_mount_offset', False)
         self.declare_parameter('stepper_enabled', True)
         self.declare_parameter('stepper_step_pin', 17)
         self.declare_parameter('stepper_dir_pin', 27)
@@ -96,6 +97,8 @@ class Lidar3DCloudNode(Node):
         self.declare_parameter('stepper_scan_drift_k', 0.04, descriptor=numeric_param_descriptor)
         self.declare_parameter('stepper_scan_drift_limit_deg', 8.0, descriptor=numeric_param_descriptor)
         self.declare_parameter('stepper_scan_drift_max_step_deg', 0.06, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_scan_drift_error_gate_deg', 8.0, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_scan_drift_endpoint_only', True)
         self.declare_parameter('stepper_scan_endpoint_correction_enabled', True)
         self.declare_parameter('stepper_scan_endpoint_tolerance_deg', 0.8, descriptor=numeric_param_descriptor)
         self.declare_parameter('stepper_scan_endpoint_window_deg', 3.0, descriptor=numeric_param_descriptor)
@@ -106,6 +109,8 @@ class Lidar3DCloudNode(Node):
         self.declare_parameter('stepper_scan_endpoint_recover_max_cycles', 2)
         self.declare_parameter('stepper_scan_top_endpoint_confirm_cycles', 2)
         self.declare_parameter('stepper_scan_cloud_feedback_blend', 0.35, descriptor=numeric_param_descriptor)
+        self.declare_parameter('stepper_scan_use_imu_feedback', True)
+        self.declare_parameter('stepper_scan_feedback_error_gate_deg', 12.0, descriptor=numeric_param_descriptor)
         self.declare_parameter('output_cloud_drift_comp_enabled', True)
         self.declare_parameter('output_cloud_drift_comp_k', 0.12, descriptor=numeric_param_descriptor)
         self.declare_parameter('output_cloud_drift_comp_limit_deg', 12.0, descriptor=numeric_param_descriptor)
@@ -140,6 +145,9 @@ class Lidar3DCloudNode(Node):
         self.flat_scan_slice_min_z_m = self._get_float_parameter('flat_scan_slice_min_z_m', 0.005)
         self.flat_scan_slice_max_z_m = self._get_float_parameter('flat_scan_slice_max_z_m', 0.390)
         self.flat_scan_ground_offset_z_m = self._get_float_parameter('flat_scan_ground_offset_z_m', 0.308)
+        self.flat_scan_ground_offset_includes_mount_offset = self.get_parameter(
+            'flat_scan_ground_offset_includes_mount_offset'
+        ).value
         if self.flat_scan_slice_min_z_m > self.flat_scan_slice_max_z_m:
             self.get_logger().warn(
                 'flat_scan_slice_min_z_m is greater than flat_scan_slice_max_z_m; swapping values.'
@@ -200,6 +208,12 @@ class Lidar3DCloudNode(Node):
         self.stepper_scan_drift_max_step_deg = self._get_float_parameter(
             'stepper_scan_drift_max_step_deg', 0.06
         )
+        self.stepper_scan_drift_error_gate_deg = self._get_float_parameter(
+            'stepper_scan_drift_error_gate_deg', 8.0
+        )
+        self.stepper_scan_drift_endpoint_only = self.get_parameter(
+            'stepper_scan_drift_endpoint_only'
+        ).value
         self.stepper_scan_endpoint_correction_enabled = self.get_parameter(
             'stepper_scan_endpoint_correction_enabled'
         ).value
@@ -241,6 +255,10 @@ class Lidar3DCloudNode(Node):
             'stepper_scan_cloud_feedback_blend', 0.35
         )
         self.stepper_scan_cloud_feedback_blend = max(0.0, min(1.0, self.stepper_scan_cloud_feedback_blend))
+        self.stepper_scan_use_imu_feedback = self.get_parameter('stepper_scan_use_imu_feedback').value
+        self.stepper_scan_feedback_error_gate_deg = self._get_float_parameter(
+            'stepper_scan_feedback_error_gate_deg', 12.0
+        )
         self.output_cloud_drift_comp_enabled = self.get_parameter('output_cloud_drift_comp_enabled').value
         self.output_cloud_drift_comp_k = self._get_float_parameter('output_cloud_drift_comp_k', 0.12)
         self.output_cloud_drift_comp_k = max(0.0, min(1.0, self.output_cloud_drift_comp_k))
@@ -277,6 +295,9 @@ class Lidar3DCloudNode(Node):
         self.output_pivot_offset_x_m = self._get_float_parameter('output_pivot_offset_x_m', 0.0)
         self.output_pivot_offset_y_m = self._get_float_parameter('output_pivot_offset_y_m', 0.0)
         self.output_pivot_offset_z_m = self._get_float_parameter('output_pivot_offset_z_m', 0.0)
+        self.flat_scan_effective_ground_offset_z_m = self.flat_scan_ground_offset_z_m
+        if self.flat_scan_ground_offset_includes_mount_offset:
+            self.flat_scan_effective_ground_offset_z_m += self.output_mount_offset_z_m
         self.output_pose_roll_offset_rad = math.radians(self.output_pose_roll_offset_deg)
         self.output_pose_pitch_offset_rad = math.radians(self.output_pose_pitch_offset_deg)
         self.output_pose_yaw_offset_rad = math.radians(self.output_pose_yaw_offset_deg)
@@ -318,6 +339,10 @@ class Lidar3DCloudNode(Node):
             self.get_logger().warn('stepper_scan_drift_max_step_deg must be > 0; forcing to 0.06 deg.')
             self.stepper_scan_drift_max_step_deg = 0.06
         self.stepper_scan_drift_max_step_rad = math.radians(self.stepper_scan_drift_max_step_deg)
+        if self.stepper_scan_drift_error_gate_deg <= 0.0:
+            self.get_logger().warn('stepper_scan_drift_error_gate_deg must be > 0; forcing to 8.0 deg.')
+            self.stepper_scan_drift_error_gate_deg = 8.0
+        self.stepper_scan_drift_error_gate_rad = math.radians(self.stepper_scan_drift_error_gate_deg)
         if self.stepper_scan_endpoint_tolerance_deg <= 0.0:
             self.get_logger().warn('stepper_scan_endpoint_tolerance_deg must be > 0; forcing to 0.8 deg.')
             self.stepper_scan_endpoint_tolerance_deg = 0.8
@@ -342,6 +367,10 @@ class Lidar3DCloudNode(Node):
         self.stepper_scan_endpoint_recover_step_rad = math.radians(
             self.stepper_scan_endpoint_recover_step_deg
         )
+        if self.stepper_scan_feedback_error_gate_deg <= 0.0:
+            self.get_logger().warn('stepper_scan_feedback_error_gate_deg must be > 0; forcing to 12.0 deg.')
+            self.stepper_scan_feedback_error_gate_deg = 12.0
+        self.stepper_scan_feedback_error_gate_rad = math.radians(self.stepper_scan_feedback_error_gate_deg)
         if self.output_cloud_drift_comp_limit_deg <= 0.0:
             self.get_logger().warn('output_cloud_drift_comp_limit_deg must be > 0; forcing to 12.0 deg.')
             self.output_cloud_drift_comp_limit_deg = 12.0
@@ -437,12 +466,15 @@ class Lidar3DCloudNode(Node):
             f'publishing {output_topic}, {output_flat_scan_topic}, and {pose_topic}'
         )
         self.get_logger().info(
-            'Flat scan: enabled=%s, z slice=[%.3f, %.3f] m above ground, pivot_ground_z=%.3f m.'
+            'Flat scan: enabled=%s, z slice=[%.3f, %.3f] m above ground, '
+            'ground_offset_z=%.3f m, include_mount_offset=%s, effective_ground_offset_z=%.3f m.'
             % (
                 self.flat_scan_enabled,
                 self.flat_scan_slice_min_z_m,
                 self.flat_scan_slice_max_z_m,
                 self.flat_scan_ground_offset_z_m,
+                self.flat_scan_ground_offset_includes_mount_offset,
+                self.flat_scan_effective_ground_offset_z_m,
             )
         )
         self.get_logger().info(
@@ -812,7 +844,13 @@ class Lidar3DCloudNode(Node):
             self.stepper_home_target_rel_pitch_rad
             + (self.stepper_current_pitch - self.stepper_home_pitch_rad)
         )
-        rel_feedback = rel_pitch if rel_pitch is not None else stepper_rel_pitch
+        feedback_gate_active = False
+        rel_feedback = stepper_rel_pitch
+        if self.stepper_scan_use_imu_feedback and rel_pitch is not None:
+            if abs(rel_pitch - stepper_rel_pitch) <= self.stepper_scan_feedback_error_gate_rad:
+                rel_feedback = rel_pitch
+            else:
+                feedback_gate_active = True
 
         # Advance the sweep target at a fixed rate, but reverse only when the measured
         # relative pitch reaches an endpoint band. This prevents premature bottom reversal.
@@ -852,16 +890,31 @@ class Lidar3DCloudNode(Node):
         profile_rel = max(lower_rel_bound, min(upper_rel_bound, profile_rel))
 
         # Update long-term bias from low-lag IMU error, with stronger correction near limits.
-        raw_rel_pitch = self.latest_relative_pitch if self.latest_relative_pitch is not None else rel_pitch
+        raw_rel_pitch = None
+        if self.stepper_scan_use_imu_feedback:
+            raw_rel_pitch = self.latest_relative_pitch if self.latest_relative_pitch is not None else rel_pitch
         drift_error = 0.0
+        drift_gate_active = False
+        drift_endpoint_only_hold = False
         if raw_rel_pitch is not None:
             # Bias tracks measured-minus-stepper offset so positive bias means the real scan
             # is higher than the step-count estimate and the command must be shifted downward.
             drift_error = raw_rel_pitch - stepper_rel_pitch
             drift_deadband = math.radians(0.12)
-            if abs(drift_error) > drift_deadband:
-                dist_to_edge = min(rel_feedback - lower_rel_bound, upper_rel_bound - rel_feedback)
-                edge_zone = max(self.stepper_min_move_rad * 4.0, 0.18 * span_rel)
+            dist_to_edge = min(rel_feedback - lower_rel_bound, upper_rel_bound - rel_feedback)
+            edge_zone = max(self.stepper_min_move_rad * 4.0, 0.18 * span_rel)
+
+            if self.stepper_scan_drift_endpoint_only and dist_to_edge > edge_zone:
+                drift_endpoint_only_hold = True
+                # In the middle of the sweep, bleed bias toward zero to avoid long-term drift.
+                bleed_step = min(abs(self.stepper_scan_rel_bias), 0.5 * self.stepper_scan_drift_max_step_rad)
+                self.stepper_scan_rel_bias -= math.copysign(bleed_step, self.stepper_scan_rel_bias)
+            elif abs(drift_error) > self.stepper_scan_drift_error_gate_rad:
+                drift_gate_active = True
+                # Bleed accumulated bias toward zero when error is implausibly large.
+                bleed_step = min(abs(self.stepper_scan_rel_bias), self.stepper_scan_drift_max_step_rad)
+                self.stepper_scan_rel_bias -= math.copysign(bleed_step, self.stepper_scan_rel_bias)
+            elif abs(drift_error) > drift_deadband:
                 edge_gain = 2.2 if dist_to_edge <= edge_zone else 0.5
                 effective_error = drift_error - math.copysign(drift_deadband, drift_error)
                 bias_delta = edge_gain * self.stepper_scan_drift_k * effective_error
@@ -958,6 +1011,20 @@ class Lidar3DCloudNode(Node):
             target = max(lower_bound, min(upper_bound, target))
         target_delta = target - self.stepper_current_pitch
 
+        mid_sweep_nudge_active = False
+        mid_sweep_nudge_step = 0.0
+        if recovery_target is None and abs(target_delta) < self.stepper_min_move_rad and self.stepper_scan_direction < 0.0:
+            # Avoid pauses around the middle of the sweep on the way down, but do not
+            # add extra upward motion near home where that looked like drift.
+            mid_low = lower_rel_bound + self.stepper_scan_endpoint_window_rad
+            mid_high = upper_rel_bound - self.stepper_scan_endpoint_window_rad
+            if mid_low < rel_feedback < mid_high:
+                mid_sweep_nudge_active = True
+                mid_sweep_nudge_step = max(self.stepper_min_move_rad, 0.5 * max_scan_step)
+                target = self.stepper_current_pitch + (self.stepper_scan_direction * mid_sweep_nudge_step)
+                target = max(lower_bound, min(upper_bound, target))
+                target_delta = target - self.stepper_current_pitch
+
         # Keep scan-point interpolation state fresh for per-point pitch estimation.
         self.stepper_scan_prev_target_rel = self.stepper_scan_target_rel
         self.stepper_scan_prev_target_time = self.stepper_scan_target_time
@@ -976,8 +1043,12 @@ class Lidar3DCloudNode(Node):
             f'current={math.degrees(self.stepper_current_pitch):.2f} deg, '
             f'rel_pitch={math.degrees(rel_pitch) if rel_pitch is not None else float("nan"):.2f} deg, '
             f'rel_feedback={math.degrees(rel_feedback):.2f} deg, '
+            f'imu_feedback={1 if self.stepper_scan_use_imu_feedback else 0}, '
+            f'feedback_gate={1 if feedback_gate_active else 0}, '
             f'stepper_rel={math.degrees(stepper_rel_pitch):.2f} deg, '
             f'drift_error={math.degrees(drift_error):.2f} deg, '
+            f'drift_gate={1 if drift_gate_active else 0}, '
+            f'drift_mid_hold={1 if drift_endpoint_only_hold else 0}, '
             f'bias={math.degrees(self.stepper_scan_rel_bias):.2f} deg, '
             f'profile_rel={math.degrees(profile_rel):.2f} deg, '
             f'sweep_target_rel={math.degrees(self.stepper_scan_target_rel):.2f} deg, '
@@ -990,6 +1061,8 @@ class Lidar3DCloudNode(Node):
             f'endpoint_recovery_cycles={self.stepper_scan_endpoint_recover_cycles}, '
             f'forced_reverse={1 if forced_reverse else 0}, '
             f'top_confirm={self.stepper_scan_top_endpoint_confirm_count}/{self.stepper_scan_top_endpoint_confirm_cycles}, '
+            f'mid_nudge={1 if mid_sweep_nudge_active else 0}, '
+            f'mid_nudge_step={math.degrees(mid_sweep_nudge_step):.2f} deg, '
             f'commanded_rel={math.degrees(commanded_rel):.2f} deg, '
             f'target_delta={math.degrees(target_delta):.2f} deg, '
             f'limit_tol={math.degrees(limit_tol):.2f} deg, '
@@ -1298,7 +1371,7 @@ class Lidar3DCloudNode(Node):
 
         ranges = [float('inf')] * beam_count
         for x, y, z in points:
-            z_above_ground = z + self.flat_scan_ground_offset_z_m
+            z_above_ground = z + self.flat_scan_effective_ground_offset_z_m
             if z_above_ground < self.flat_scan_slice_min_z_m or z_above_ground > self.flat_scan_slice_max_z_m:
                 continue
 
