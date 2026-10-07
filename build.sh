@@ -4,6 +4,7 @@
 
 set -e
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE="${1:-.}"
 cd "$WORKSPACE"
 
@@ -18,7 +19,10 @@ colcon build \
   --parallel-workers 4 \
   --packages-skip cv_bridge image_geometry opencv_tests vision_opencv robot_localization nav2_mppi_controller nav2_waypoint_follower nav2_rviz_plugins navigation2 nav2_bringup nav2_system_tests \
   --cmake-args -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_CXX_FLAGS=-Wno-error=null-dereference \
+  -DCMAKE_CXX_FLAGS= \
+  -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF \
+  "-DCMAKE_C_COMPILER_LAUNCHER=bash;$SCRIPT_DIR/compiler_no_werror.sh" \
+  "-DCMAKE_CXX_COMPILER_LAUNCHER=bash;$SCRIPT_DIR/compiler_no_werror.sh" \
   -DCV_BRIDGE_DISABLE_PYTHON=ON \
   "$@"
 
