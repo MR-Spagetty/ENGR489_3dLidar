@@ -18,6 +18,7 @@ colcon build \
   --parallel-workers 4 \
   --packages-skip cv_bridge image_geometry opencv_tests vision_opencv robot_localization nav2_mppi_controller nav2_waypoint_follower nav2_rviz_plugins navigation2 nav2_bringup nav2_system_tests \
   --cmake-args -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CXX_FLAGS=-Wno-error=null-dereference \
   -DCV_BRIDGE_DISABLE_PYTHON=ON \
   "$@"
 
@@ -25,4 +26,3 @@ echo ""
 echo "✅ Build complete!"
 echo "   Libexec symlinks created by CMake install(CODE)"
 echo "   Use: source install/setup.bash"
-
